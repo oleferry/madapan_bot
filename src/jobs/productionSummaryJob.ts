@@ -1,7 +1,7 @@
 import { Telegraf } from 'telegraf';
 import { config } from '../config';
 import { initNotifier, sendToAdmin } from '../services/notifier';
-import { buildVariationSummary } from '../services/productionSummary';
+import { buildProductionSummary } from '../services/productionSummary';
 import { log, warn } from '../utils/logger';
 import { toZonedTime, format } from 'date-fns-tz';
 
@@ -26,7 +26,7 @@ export function scheduleProductionSummary(bot: Telegraf): void {
       const tomorrowDow = tomorrow.getDay(); // 0=Dom…6=Sáb
 
       try {
-        const text = await buildVariationSummary(tomorrowStr, tomorrowDow);
+        const text = await buildProductionSummary(tomorrowStr, tomorrowDow);
         await sendToAdmin(text);
         log('ProductionSummaryJob', `Resumen de producción enviado para ${tomorrowStr}`);
       } catch (err) {
