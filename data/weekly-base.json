@@ -1,0 +1,10 @@
+{
+  "_note": "Cantidades base por producto y día de semana (extraídas de Resumen_producción). Actualizar cuando cambie la base semanal.",
+  "Lunes":    { "Barra": 86, "Barra pequeña": 41, "Chapata": 52, "Hogaza": 7,  "Hogaza MM centeno": 1, "Pan de canteros": 5, "Pan de cuadros": 47, "Pan integral": 1, "Pan pequeño": 35, "Torta de aceite": 6 },
+  "Martes":   { "Barra": 96, "Barra pequeña": 41, "Chapata": 51, "Hogaza": 3,  "Hogaza MM centeno": 6, "Pan de canteros": 5, "Pan de cuadros": 49, "Pan integral": 1, "Pan pequeño": 39, "Torta de aceite": 3 },
+  "Miércoles":{ "Barra": 96, "Barra pequeña": 41, "Chapata": 55, "Hogaza": 8,  "Hogaza MM centeno": 1, "Pan de canteros": 5, "Pan de cuadros": 49, "Pan integral": 1, "Pan pequeño": 39, "Torta de aceite": 8 },
+  "Jueves":   { "Barra": 101,"Barra pequeña": 41, "Chapata": 64, "Hogaza": 3,  "Hogaza MM centeno": 6, "Pan de canteros": 5, "Pan de cuadros": 54, "Pan integral": 1, "Pan pequeño": 39, "Torta de aceite": 3 },
+  "Viernes":  { "Barra": 101,"Barra pequeña": 41, "Chapata": 64, "Hogaza": 8,  "Hogaza MM centeno": 1, "Pan de canteros": 5, "Pan de cuadros": 59, "Pan integral": 1, "Pan pequeño": 44, "Torta de aceite": 8 },
+  "Sábado":   { "Barra": 131,"Barra pequeña": 31, "Chapata": 80, "Hogaza": 13, "Hogaza MM centeno": 6, "Pan de canteros": 5, "Pan de cuadros": 86, "Pan integral": 1, "Pan pequeño": 29, "Torta de aceite": 8 },
+  "Domingo":  { "Barra": 145,"Barra pequeña": 22, "Chapata": 79, "Hogaza": 13, "Hogaza MM centeno": 5, "Pan de canteros": 5, "Pan de cuadros": 89, "Pan integral": 2, "Pan pequeño": 25, "Torta de aceite": 9 }
+}

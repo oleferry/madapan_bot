@@ -3,6 +3,7 @@ import { config } from './config';
 import { loadCache } from './services/clientCache';
 import { launchBot } from './bot/telegramBot';
 import { scheduleDailySummary } from './jobs/dailySummaryJob';
+import { scheduleProductionSummary } from './jobs/productionSummaryJob';
 import { log } from './utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,6 +17,8 @@ async function main(): Promise<void> {
   const bot = await launchBot();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   scheduleDailySummary(bot as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  scheduleProductionSummary(bot as any);
 
   log('main', `Bot started. DRY_RUN=${config.dryRun}`);
 

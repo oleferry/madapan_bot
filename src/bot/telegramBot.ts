@@ -19,6 +19,9 @@ import {
   handleShowAddProduct,
   handleAddProductSelected,
   handleAddProductQuantity,
+  handleCancelLineConfirm,
+  handleCancelLine,
+  handleOrderHistory,
 } from './customerFlows';
 
 export function createBot(): Telegraf<BotContext> {
@@ -142,6 +145,33 @@ export function createBot(): Telegraf<BotContext> {
       if (data.startsWith('apq_manual|')) {
         const productCod = data.split('|')[1]!;
         await handleAddProductSelected(ctx, productCod);
+        return;
+      }
+
+      // cancel_line|lineIdx — pedir confirmación
+      if (data.startsWith('cancel_line|') && !data.startsWith('cancel_line_ok|')) {
+        const lineIdx = parseInt(data.split('|')[1]!, 10);
+        await handleCancelLineConfirm(ctx, lineIdx);
+        return;
+      }
+
+      // cancel_line_ok|lineIdx — confirmar y ejecutar
+      if (data.startsWith('cancel_line_ok|')) {
+        const lineIdx = parseInt(data.split('|')[1]!, 10);
+        await handleCancelLine(ctx, lineIdx);
+        return;
+      }
+
+      // view_order|dateStr
+      if (data.startsWith('view_order|')) {
+        const dateStr = data.split('|')[1]!;
+        await handleViewOrder(ctx, dateStr);
+        return;
+      }
+
+      // order_history
+      if (data === 'order_history') {
+        await handleOrderHistory(ctx);
         return;
       }
 

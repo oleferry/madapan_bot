@@ -21,6 +21,7 @@ export interface SessionData {
   // líneas del pedido actual guardadas en sesión para evitar IDs largos en botones
   orderLines?: Array<{ id: string; name: string; units: number }>;
   addingProduct?: boolean;
+  pendingCancelLineIdx?: number; // índice de línea pendiente de confirmar cancelación
 }
 
 export type BotContext = Context & { session: SessionData };
@@ -101,6 +102,7 @@ async function sendMainMenu(ctx: BotContext, name: string): Promise<void> {
       [Markup.button.callback('Ver pedido de mañana', 'view_tomorrow')],
       [Markup.button.callback('Modificar pedido de mañana', 'change_tomorrow')],
       [Markup.button.callback('Modificar otro día', 'select_day')],
+      [Markup.button.callback('Historial de pedidos', 'order_history')],
       [Markup.button.callback('Contactar con Madapan', 'contact_madapan')],
     ])
   );
@@ -222,7 +224,8 @@ export async function handleProductSelected(
         Markup.button.callback('+5', `d|${i}|5`),
       ],
       [Markup.button.callback('Cantidad exacta', `exact|${i}`)],
-      [Markup.button.callback('Cancelar', 'main_menu')],
+      [Markup.button.callback('Eliminar del pedido', `cancel_line|${i}`)],
+      [Markup.button.callback('Volver', 'main_menu')],
     ])
   );
 }
@@ -596,6 +599,131 @@ export async function handleAddProductQuantity(ctx: BotContext, productCod: stri
     [Markup.button.callback('Ver pedido actualizado', 'view_tomorrow')],
     [Markup.button.callback('Menú principal', 'main_menu')],
   ]));
+}
+
+// ── Cancel line ───────────────────────────────────────────────────────────────
+
+export async function handleCancelLineConfirm(ctx: BotContext, lineIdx: number): Promise<void> {
+  const sessionLine = ctx.session.orderLines?.[lineIdx];
+  if (!sessionLine || !ctx.session.selectedOrderId || !ctx.session.selectedDate) {
+    await ctx.reply('Sesión expirada. Usa /hola para empezar de nuevo.');
+    return;
+  }
+
+  ctx.session.pendingCancelLineIdx = lineIdx;
+
+  await ctx.reply(
+    `¿Seguro que quieres eliminar "${sessionLine.name}" del pedido?`,
+    Markup.inlineKeyboard([
+      [
+        Markup.button.callback('Sí, eliminar', `cancel_line_ok|${lineIdx}`),
+        Markup.button.callback('No, volver', `product|${lineIdx}`),
+      ],
+    ])
+  );
+}
+
+export async function handleCancelLine(ctx: BotContext, lineIdx: number): Promise<void> {
+  const customer = await resolveCustomer(ctx);
+  if (!customer) return;
+
+  const sessionLine = ctx.session.orderLines?.[lineIdx];
+  const dateStr = ctx.session.selectedDate;
+  const orderId = ctx.session.selectedOrderId;
+
+  if (!sessionLine || !dateStr || !orderId) {
+    await ctx.reply('Sesión expirada. Usa /hola para empezar de nuevo.');
+    return;
+  }
+
+  try {
+    const order = await orderService.getOrderForDate(customer, dateStr);
+    if (!order) {
+      await ctx.reply('No se pudo cargar el pedido.');
+      return;
+    }
+
+    const { removeLineFromOrder } = await import('../services/holdedClient');
+    const result = await removeLineFromOrder(orderId, sessionLine.id, order);
+
+    if (!result.success) {
+      await ctx.reply('Error al eliminar el producto. Inténtalo de nuevo.');
+      return;
+    }
+
+    // Eliminar de la sesión
+    if (ctx.session.orderLines) {
+      ctx.session.orderLines.splice(lineIdx, 1);
+    }
+
+    const { logChange } = await import('../utils/logger');
+    logChange({
+      timestamp: new Date().toISOString(),
+      telegramId: customer.telegramId,
+      customerName: customer.name,
+      orderId,
+      lineId: sessionLine.id,
+      productName: sessionLine.name,
+      sku: '',
+      previousUnits: sessionLine.units,
+      newUnits: 0,
+      delta: -sessionLine.units,
+      source: 'button',
+      dryRun: (await import('../config')).config.dryRun,
+    });
+
+    await ctx.reply(
+      `✓ "${sessionLine.name}" eliminado del pedido.`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Ver pedido actualizado', `view_order|${dateStr}`)],
+        [Markup.button.callback('Menú principal', 'main_menu')],
+      ])
+    );
+  } catch (err) {
+    warn('CustomerFlows', `handleCancelLine error: ${(err as Error).message}`);
+    await ctx.reply('Error al eliminar el producto. Inténtalo de nuevo.');
+  }
+}
+
+// ── Order history ─────────────────────────────────────────────────────────────
+
+export async function handleOrderHistory(ctx: BotContext): Promise<void> {
+  const customer = await resolveCustomer(ctx);
+  if (!customer) return;
+
+  try {
+    const { listOrdersByContact } = await import('../services/holdedClient');
+    const { formatDateSpanish } = await import('../utils/dates');
+    const orders = await listOrdersByContact(customer.holdedContactId);
+
+    if (orders.length === 0) {
+      await ctx.reply('No se encontraron pedidos anteriores.');
+      return;
+    }
+
+    // Ordenar por fecha descendente y tomar los últimos 7
+    const sorted = [...orders]
+      .filter(o => o.date)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+      .slice(0, 7);
+
+    let text = `Últimos pedidos:\n\n`;
+    for (const o of sorted) {
+      const dateStr = typeof o.date === 'number'
+        ? new Date(o.date * 1000).toISOString().split('T')[0]!
+        : String(o.date).split('T')[0]!;
+      const label = formatDateSpanish(dateStr);
+      const nLines = Array.isArray(o.lines) ? o.lines.length : '?';
+      text += `• ${label} — ${nLines} producto(s)\n`;
+    }
+
+    await ctx.reply(text, Markup.inlineKeyboard([
+      [Markup.button.callback('Menú principal', 'main_menu')],
+    ]));
+  } catch (err) {
+    warn('CustomerFlows', `handleOrderHistory error: ${(err as Error).message}`);
+    await ctx.reply('Error al obtener el historial. Inténtalo de nuevo.');
+  }
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────

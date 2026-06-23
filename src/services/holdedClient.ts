@@ -269,6 +269,71 @@ export async function updateLineUnits(
   }
 }
 
+export async function removeLineFromOrder(
+  orderId: string,
+  lineId: string,
+  order: HoldedOrder
+): Promise<{ success: boolean; error?: string }> {
+  if (isDryRun) {
+    log('HoldedClient', `[DRY_RUN] Would remove line ${lineId} from order ${orderId}`);
+    return { success: true };
+  }
+
+  try {
+    const items = order.lines
+      .filter((line: HoldedLine) => line.id !== lineId)
+      .map((line: HoldedLine) => ({
+        productId: line.productId,
+        variantId: line.variantId,
+        units: line.units,
+        price: line.price,
+        discount: line.discount,
+        taxes: line.taxes,
+        name: line.name,
+        sku: line.sku,
+      }));
+
+    await withRetry(() =>
+      getInvoicingV1Client().put(`/documents/salesorder/${orderId}`, { items })
+    );
+
+    log('HoldedClient', `Removed line ${lineId} from order ${orderId}`);
+    return { success: true };
+  } catch (err) {
+    const msg = (err as Error).message;
+    error('HoldedClient', `removeLineFromOrder failed: ${msg}`);
+    return { success: false, error: msg };
+  }
+}
+
+export async function listAllOrdersForDate(dateStr: string): Promise<HoldedOrder[]> {
+  try {
+    log('HoldedClient', `listAllOrdersForDate(${dateStr})...`);
+    const response = await withRetry(() =>
+      getInvoicingClient().get<any>('/sales-orders', {
+        params: { starDate: dateStr, endDate: dateStr, limit: 500 },
+      })
+    );
+    const list: any[] = Array.isArray(response.data)
+      ? response.data
+      : Array.isArray(response.data?.items)
+        ? response.data.items
+        : [];
+
+    // Cargar las órdenes completas con líneas
+    const orders: HoldedOrder[] = [];
+    for (const item of list) {
+      const full = await getOrder(item.id);
+      if (full) orders.push(full);
+    }
+    log('HoldedClient', `listAllOrdersForDate(${dateStr}): ${orders.length} pedidos`);
+    return orders;
+  } catch (err) {
+    error('HoldedClient', `listAllOrdersForDate failed: ${(err as Error).message}`);
+    return [];
+  }
+}
+
 export async function addLineToOrder(
   orderId: string,
   order: HoldedOrder,
