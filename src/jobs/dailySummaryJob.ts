@@ -65,7 +65,7 @@ export function scheduleDailySummary(bot: Telegraf): void {
     const currentHour = now.getHours();
     const today = format(now, 'yyyy-MM-dd', { timeZone: config.timezone });
 
-    if (currentHour === config.autoCutoffHour && lastSentDate !== today) {
+    if (currentHour === config.dailySummaryHour && lastSentDate !== today) {
       lastSentDate = today;
       const entries = readTodayChanges();
       const text = buildSummaryText(entries, today);
@@ -76,5 +76,5 @@ export function scheduleDailySummary(bot: Telegraf): void {
     }
   }, 60_000);
 
-  log('DailySummaryJob', `Resumen diario programado a las ${config.autoCutoffHour}:00 (${config.timezone})`);
+  log('DailySummaryJob', `Resumen diario programado a las ${config.dailySummaryHour}:00 (${config.timezone})`);
 }
