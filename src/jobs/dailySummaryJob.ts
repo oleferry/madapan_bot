@@ -11,7 +11,7 @@ function todayInMadrid(): string {
   return format(now, 'yyyy-MM-dd', { timeZone: config.timezone });
 }
 
-function readTodayChanges(): ChangeLogEntry[] {
+export function readTodayChanges(): ChangeLogEntry[] {
   const today = todayInMadrid();
   try {
     if (!fs.existsSync(config.logPath)) return [];
@@ -27,7 +27,7 @@ function readTodayChanges(): ChangeLogEntry[] {
   }
 }
 
-function buildSummaryText(entries: ChangeLogEntry[], today: string): string {
+export function buildSummaryText(entries: ChangeLogEntry[], today: string): string {
   if (entries.length === 0) {
     return `📋 Resumen de cambios — ${today}\n\nNo hubo cambios en los pedidos hoy.`;
   }

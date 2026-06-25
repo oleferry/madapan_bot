@@ -41,7 +41,31 @@ export function createBot(): Telegraf<BotContext> {
   // Comando para obtener el chat ID (para configurar TELEGRAM_INTERNAL_CHAT_ID)
   bot.command('admin', async (ctx) => {
     const chatId = ctx.chat.id;
-    await ctx.reply(`Tu chat ID es: ${chatId}\n\nPégalo en el .env como:\nTELEGRAM_INTERNAL_CHAT_ID=${chatId}`);
+    await ctx.reply(`Tu chat ID es: ${chatId}\n\nPégalo en Railway como:\nTELEGRAM_INTERNAL_CHAT_ID=${chatId}`);
+  });
+
+  // Resumen de producción bajo demanda (solo desde el chat interno)
+  bot.command('produccion', async (ctx) => {
+    if (String(ctx.chat.id) !== config.telegramInternalChatId) return;
+    const { getTomorrowDate } = await import('../utils/dates');
+    const { buildProductionSummary } = await import('../services/productionSummary');
+    const dateStr = getTomorrowDate();
+    const dow = new Date(dateStr).getDay();
+    await ctx.reply('Calculando producción de mañana...');
+    const text = await buildProductionSummary(dateStr, dow);
+    await ctx.reply(text);
+  });
+
+  // Resumen de cambios bajo demanda (solo desde el chat interno)
+  bot.command('resumen', async (ctx) => {
+    if (String(ctx.chat.id) !== config.telegramInternalChatId) return;
+    const { toZonedTime, format } = await import('date-fns-tz');
+    const { readTodayChanges, buildSummaryText } = await import('../jobs/dailySummaryJob');
+    const now = toZonedTime(new Date(), config.timezone);
+    const today = format(now, 'yyyy-MM-dd', { timeZone: config.timezone });
+    const entries = readTodayChanges();
+    const text = buildSummaryText(entries, today);
+    await ctx.reply(text);
   });
 
   // ── Contact ─────────────────────────────────────────────────────────────────

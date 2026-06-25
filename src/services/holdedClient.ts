@@ -309,9 +309,13 @@ export async function removeLineFromOrder(
 export async function listAllOrdersForDate(dateStr: string): Promise<HoldedOrder[]> {
   try {
     log('HoldedClient', `listAllOrdersForDate(${dateStr})...`);
+    const { dateStrToUnix } = await import('../utils/dates');
+    const startTs = dateStrToUnix(dateStr);
+    const endTs = startTs + 86399; // fin del día
+
     const response = await withRetry(() =>
       getInvoicingClient().get<any>('/sales-orders', {
-        params: { starDate: dateStr, endDate: dateStr, limit: 500 },
+        params: { startDate: startTs, endDate: endTs, limit: 500 },
       })
     );
     const list: any[] = Array.isArray(response.data)
@@ -320,9 +324,13 @@ export async function listAllOrdersForDate(dateStr: string): Promise<HoldedOrder
         ? response.data.items
         : [];
 
-    // Cargar las órdenes completas con líneas
+    // Filtrar también por fecha en local por si Holded no filtra bien
     const orders: HoldedOrder[] = [];
     for (const item of list) {
+      const itemDate = typeof item.date === 'number'
+        ? unixToDateStr(item.date)
+        : String(item.date ?? '').split('T')[0];
+      if (itemDate !== dateStr) continue;
       const full = await getOrder(item.id);
       if (full) orders.push(full);
     }
