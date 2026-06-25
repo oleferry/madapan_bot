@@ -128,8 +128,8 @@ function parseEsNumber(value: any): number {
 // Mapea un pedido crudo de Holded a nuestra estructura HoldedOrder
 function mapOrder(raw: any): HoldedOrder {
   const rawLines = Array.isArray(raw.lines) ? raw.lines : [];
-  const lines: HoldedLine[] = rawLines.map((l: any) => ({
-    id: l.line_id ?? l.id ?? '',
+  const lines: HoldedLine[] = rawLines.map((l: any, idx: number) => ({
+    id: l.line_id ?? l.id ?? `line_${idx}`,
     productId: l.product_id ?? '',
     variantId: l.variant_id ?? '',
     sku: l.sku ?? '',
