@@ -22,6 +22,7 @@ import {
   handleCancelLineConfirm,
   handleCancelLine,
   handleOrderHistory,
+  handleAdminSelectClient,
 } from './customerFlows';
 
 export function createBot(): Telegraf<BotContext> {
@@ -196,6 +197,12 @@ export function createBot(): Telegraf<BotContext> {
       // order_history
       if (data === 'order_history') {
         await handleOrderHistory(ctx);
+        return;
+      }
+
+      // admin_select_client
+      if (data === 'admin_select_client') {
+        await handleAdminSelectClient(ctx);
         return;
       }
 

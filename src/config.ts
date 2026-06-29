@@ -6,6 +6,8 @@ export const config = {
   telegramInternalChatId: process.env['TELEGRAM_INTERNAL_CHAT_ID'] ?? '',
   telegramAlertChatIds: (process.env['TELEGRAM_ALERT_CHAT_IDS'] ?? '')
     .split(',').map(s => s.trim()).filter(Boolean),
+  adminTelegramIds: (process.env['ADMIN_TELEGRAM_IDS'] ?? '')
+    .split(',').map(s => s.trim()).filter(Boolean),
   holdedApiKey: process.env['HOLDED_API_KEY'] ?? '',
   holdedApiKeyV1: process.env['HOLDED_API_KEY_V1'] ?? '',
   holdedApiBaseUrl: process.env['HOLDED_API_BASE_URL'] ?? 'https://api.holded.com/api/v2',

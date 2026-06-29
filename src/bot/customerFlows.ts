@@ -7,11 +7,13 @@ import * as catalogService from '../services/catalogService';
 import { parseCustomerMessage } from '../services/messageParser';
 import { getTomorrowDate, formatDateSpanish, getCurrentWeekDates } from '../utils/dates';
 import { log, warn } from '../utils/logger';
+import { config } from '../config';
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
 export interface SessionData {
-  step: 'idle' | 'awaiting_phone' | 'selecting_product' | 'selecting_day' | 'entering_exact';
+  step: 'idle' | 'awaiting_phone' | 'selecting_product' | 'selecting_day' | 'entering_exact' | 'admin_awaiting_nif';
+  isAdmin?: boolean;
   selectedDate?: string;
   selectedOrderId?: string;
   selectedLineId?: string;
@@ -28,10 +30,22 @@ export type BotContext = Context & { session: SessionData };
 
 // ── /start ────────────────────────────────────────────────────────────────────
 
+function isAdmin(ctx: BotContext): boolean {
+  const telegramId = String(ctx.from?.id ?? '');
+  return config.adminTelegramIds.includes(telegramId);
+}
+
 export async function handleStart(ctx: BotContext): Promise<void> {
   const telegramId = String(ctx.from?.id ?? '');
 
   try {
+    // Los administradores ven el menú de admin
+    if (isAdmin(ctx)) {
+      ctx.session.isAdmin = true;
+      await sendAdminMenu(ctx);
+      return;
+    }
+
     const cached = clientCache.getClient(telegramId);
     if (cached) {
       ctx.session.customer = cached;
@@ -109,8 +123,62 @@ async function sendMainMenu(ctx: BotContext, name: string): Promise<void> {
 }
 
 export async function handleMainMenu(ctx: BotContext): Promise<void> {
+  // Si es admin y aún no ha elegido cliente, volver al menú de admin
+  if (ctx.session.isAdmin && !ctx.session.customer) {
+    await sendAdminMenu(ctx);
+    return;
+  }
   const customer = await resolveCustomer(ctx);
   if (!customer) return;
+  await sendMainMenu(ctx, customer.name);
+}
+
+// ── Admin menu ──────────────────────────────────────────────────────────────────
+
+async function sendAdminMenu(ctx: BotContext): Promise<void> {
+  const clienteActual = ctx.session.customer
+    ? `\n\nCliente actual: ${ctx.session.customer.name}`
+    : '';
+  await ctx.reply(
+    `Modo administrador 🔧${clienteActual}\n\n¿Qué deseas hacer?`,
+    Markup.inlineKeyboard([
+      [Markup.button.callback('Editar pedido de un cliente', 'admin_select_client')],
+      ...(ctx.session.customer
+        ? [[Markup.button.callback(`Seguir con ${ctx.session.customer.name}`, 'view_tomorrow')]]
+        : []),
+    ])
+  );
+}
+
+export async function handleAdminSelectClient(ctx: BotContext): Promise<void> {
+  ctx.session.step = 'admin_awaiting_nif';
+  ctx.session.customer = undefined;
+  await ctx.reply('Escribe el NIF/CIF del cliente cuyo pedido quieres editar:');
+}
+
+// Carga un cliente por NIF para que el admin opere sobre su pedido
+async function adminLoadClient(ctx: BotContext, nif: string): Promise<void> {
+  const contact = await (await import('../services/holdedClient')).findContactByNif(nif);
+  if (!contact) {
+    await ctx.reply('No he encontrado ese NIF en Holded. Comprueba que es correcto e inténtalo de nuevo.');
+    return;
+  }
+
+  const catalogClient = contact.code ? catalogService.getClientByNif(contact.code) : null;
+  const customer: Customer = {
+    telegramId: String(ctx.from?.id ?? ''),
+    holdedContactId: contact.id,
+    name: contact.name,
+    phone: contact.phone ?? '',
+    tarifa: catalogClient?.tarifa ?? 'Tarifa 2025',
+    discount: catalogClient?.discount ?? 20,
+  };
+
+  ctx.session.customer = customer;
+  ctx.session.step = 'idle';
+  log('CustomerFlows', `Admin ${ctx.from?.id} editando cliente ${customer.name}`);
+
+  await ctx.reply(`✅ Cliente cargado: ${customer.name}`);
   await sendMainMenu(ctx, customer.name);
 }
 
@@ -302,6 +370,18 @@ export async function handleText(ctx: BotContext): Promise<void> {
   if (!ctx.message || !('text' in ctx.message)) return;
   const text = (ctx.message as Message.TextMessage).text;
   try {
+    // Admin: cargar cliente por NIF
+    if (ctx.session.step === 'admin_awaiting_nif') {
+      const nif = text.trim();
+      const nifLike = /^[A-Z0-9]{7,12}$/i.test(nif.replace(/[\s\-]/g, ''));
+      if (!nifLike) {
+        await ctx.reply('Por favor escribe un NIF/CIF válido (por ejemplo: 12345678A o B12345678):');
+        return;
+      }
+      await adminLoadClient(ctx, nif);
+      return;
+    }
+
     // Registro por NIF
     if (ctx.session.step === 'awaiting_phone') {
       const telegramId = String(ctx.from?.id ?? '');
@@ -541,8 +621,8 @@ export async function handleAddProductSelected(ctx: BotContext, productCod: stri
     return;
   }
 
-  // Aviso si el producto necesita 24h y el pedido es para mañana
-  if (product.special24h) {
+  // Aviso si el producto necesita 24h y el pedido es para mañana (los admin pueden saltarlo)
+  if (product.special24h && !ctx.session.isAdmin) {
     const tomorrow = getTomorrowDate();
     if (dateStr === tomorrow) {
       await ctx.reply(
@@ -737,6 +817,12 @@ async function resolveCustomer(ctx: BotContext): Promise<Customer | null> {
   if (cached) {
     ctx.session.customer = cached;
     return cached;
+  }
+
+  if (ctx.session.isAdmin || config.adminTelegramIds.includes(telegramId)) {
+    ctx.session.isAdmin = true;
+    await sendAdminMenu(ctx);
+    return null;
   }
 
   await ctx.reply('No estás registrado. Usa /start para comenzar.');
