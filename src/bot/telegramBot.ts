@@ -42,7 +42,13 @@ export function createBot(): Telegraf<BotContext> {
   // Comando para obtener el chat ID (para configurar TELEGRAM_INTERNAL_CHAT_ID)
   bot.command('admin', async (ctx) => {
     const chatId = ctx.chat.id;
-    await ctx.reply(`Tu chat ID es: ${chatId}\n\nPégalo en Railway como:\nTELEGRAM_INTERNAL_CHAT_ID=${chatId}`);
+    const fromId = String(ctx.from?.id ?? '');
+    const esAdmin = config.adminTelegramIds.includes(fromId);
+    await ctx.reply(
+      `Tu chat ID: ${chatId}\nTu from.id: ${fromId}\n\n` +
+      `¿Reconocido como admin?: ${esAdmin ? 'SÍ ✅' : 'NO ❌'}\n` +
+      `Admins configurados: [${config.adminTelegramIds.join(', ') || 'NINGUNO'}]`
+    );
   });
 
   // Resumen de producción bajo demanda (solo desde el chat interno)
