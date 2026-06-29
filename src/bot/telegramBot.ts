@@ -23,6 +23,8 @@ import {
   handleCancelLine,
   handleOrderHistory,
   handleAdminSelectClient,
+  handleAdminByNif,
+  handleAdminClientChosen,
 } from './customerFlows';
 
 export function createBot(): Telegraf<BotContext> {
@@ -209,6 +211,19 @@ export function createBot(): Telegraf<BotContext> {
       // admin_select_client
       if (data === 'admin_select_client') {
         await handleAdminSelectClient(ctx);
+        return;
+      }
+
+      // admin_by_nif — buscar cliente escribiendo NIF
+      if (data === 'admin_by_nif') {
+        await handleAdminByNif(ctx);
+        return;
+      }
+
+      // acli|NIF — cliente elegido del desplegable
+      if (data.startsWith('acli|')) {
+        const nif = data.split('|')[1]!;
+        await handleAdminClientChosen(ctx, nif);
         return;
       }
 

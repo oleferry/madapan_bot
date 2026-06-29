@@ -43,6 +43,14 @@ export function getAllProducts(): CatalogProduct[] {
   return load().products;
 }
 
+// Lista de clientes (NIF + nombre) ordenada alfabéticamente — para el menú de admin
+export function getAllClients(): Array<{ nif: string; name: string }> {
+  const c = load();
+  return Object.entries(c.clients)
+    .map(([nif, client]) => ({ nif, name: client.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function getProductByCod(cod: string): CatalogProduct | null {
   return load().products.find(p => p.cod === cod) ?? null;
 }

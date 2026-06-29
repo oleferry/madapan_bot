@@ -151,9 +151,32 @@ async function sendAdminMenu(ctx: BotContext): Promise<void> {
 }
 
 export async function handleAdminSelectClient(ctx: BotContext): Promise<void> {
+  ctx.session.customer = undefined;
+  ctx.session.step = 'idle';
+
+  const clientes = catalogService.getAllClients();
+  if (clientes.length === 0) {
+    // Fallback: pedir NIF por texto si no hay clientes en el catálogo
+    ctx.session.step = 'admin_awaiting_nif';
+    await ctx.reply('Escribe el NIF/CIF del cliente cuyo pedido quieres editar:');
+    return;
+  }
+
+  // Un botón por cliente; callback "acli|NIF"
+  const buttons = clientes.map(c => [Markup.button.callback(c.name, `acli|${c.nif}`)]);
+  buttons.push([Markup.button.callback('Buscar por NIF', 'admin_by_nif')]);
+
+  await ctx.reply('Selecciona el cliente cuyo pedido quieres editar:', Markup.inlineKeyboard(buttons));
+}
+
+export async function handleAdminByNif(ctx: BotContext): Promise<void> {
   ctx.session.step = 'admin_awaiting_nif';
   ctx.session.customer = undefined;
-  await ctx.reply('Escribe el NIF/CIF del cliente cuyo pedido quieres editar:');
+  await ctx.reply('Escribe el NIF/CIF del cliente:');
+}
+
+export async function handleAdminClientChosen(ctx: BotContext, nif: string): Promise<void> {
+  await adminLoadClient(ctx, nif);
 }
 
 // Carga un cliente por NIF para que el admin opere sobre su pedido
