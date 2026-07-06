@@ -27,6 +27,29 @@ import {
   handleAdminClientChosen,
 } from './customerFlows';
 
+function isStaff(ctx: { from?: { id: number } }): boolean {
+  return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
+}
+
+async function sendResumenYProduccion(ctx: { reply: (text: string) => Promise<unknown> }): Promise<void> {
+  const { getRelevantProductionDate, getDayOfWeek, formatDateSpanish } = await import('../utils/dates');
+  const { buildProductionSummary } = await import('../services/productionSummary');
+  const { toZonedTime, format } = await import('date-fns-tz');
+  const { readTodayChanges, buildSummaryText } = await import('../jobs/dailySummaryJob');
+
+  const dateStr = getRelevantProductionDate();
+  const now = toZonedTime(new Date(), config.timezone);
+  const today = format(now, 'yyyy-MM-dd', { timeZone: config.timezone });
+
+  await ctx.reply(`Calculando resumen y producción para ${formatDateSpanish(dateStr)}...`);
+
+  const entries = readTodayChanges();
+  const resumenText = buildSummaryText(entries, today);
+  const produccionText = await buildProductionSummary(dateStr, getDayOfWeek(dateStr));
+
+  await ctx.reply(`${resumenText}\n\n──────────\n\n${produccionText}`);
+}
+
 export function createBot(): Telegraf<BotContext> {
   const bot = new Telegraf<BotContext>(config.telegramBotToken);
 
@@ -41,33 +64,26 @@ export function createBot(): Telegraf<BotContext> {
   bot.start(handleStart);
   bot.command('hola', handleStart);
 
-  // Comando para obtener el chat ID (para configurar TELEGRAM_INTERNAL_CHAT_ID)
+  // Comando para obtener el chat ID (para configurar ADMIN_TELEGRAM_IDS)
   bot.command('admin', async (ctx) => {
     const chatId = ctx.chat.id;
-    const fromId = String(ctx.from?.id ?? '');
-    const esAdmin = config.adminTelegramIds.includes(fromId);
-    await ctx.reply(
-      `Tu chat ID: ${chatId}\nTu from.id: ${fromId}\n\n` +
-      `¿Reconocido como admin?: ${esAdmin ? 'SÍ ✅' : 'NO ❌'}\n` +
-      `Admins configurados: [${config.adminTelegramIds.join(', ') || 'NINGUNO'}]`
-    );
+    await ctx.reply(`Tu chat ID es: ${chatId}\n\nPara darte acceso de staff, añádelo a ADMIN_TELEGRAM_IDS en Railway.`);
   });
 
-  // Resumen de producción bajo demanda (solo desde el chat interno)
+  // Resumen de producción bajo demanda (staff — cualquier admin)
   bot.command('produccion', async (ctx) => {
-    if (String(ctx.chat.id) !== config.telegramInternalChatId) return;
-    const { getTomorrowDate } = await import('../utils/dates');
+    if (!isStaff(ctx)) return;
+    const { getRelevantProductionDate, getDayOfWeek } = await import('../utils/dates');
     const { buildProductionSummary } = await import('../services/productionSummary');
-    const dateStr = getTomorrowDate();
-    const dow = new Date(dateStr).getDay();
-    await ctx.reply('Calculando producción de mañana...');
-    const text = await buildProductionSummary(dateStr, dow);
+    const dateStr = getRelevantProductionDate();
+    await ctx.reply('Calculando producción...');
+    const text = await buildProductionSummary(dateStr, getDayOfWeek(dateStr));
     await ctx.reply(text);
   });
 
-  // Resumen de cambios bajo demanda (solo desde el chat interno)
+  // Resumen de cambios bajo demanda (staff — cualquier admin)
   bot.command('resumen', async (ctx) => {
-    if (String(ctx.chat.id) !== config.telegramInternalChatId) return;
+    if (!isStaff(ctx)) return;
     const { toZonedTime, format } = await import('date-fns-tz');
     const { readTodayChanges, buildSummaryText } = await import('../jobs/dailySummaryJob');
     const now = toZonedTime(new Date(), config.timezone);
@@ -75,6 +91,12 @@ export function createBot(): Telegraf<BotContext> {
     const entries = readTodayChanges();
     const text = buildSummaryText(entries, today);
     await ctx.reply(text);
+  });
+
+  // Resumen + producción combinados, en un solo comando (staff — cualquier admin)
+  bot.command('resumen_produccion', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await sendResumenYProduccion(ctx);
   });
 
   // ── Contact ─────────────────────────────────────────────────────────────────
@@ -224,6 +246,12 @@ export function createBot(): Telegraf<BotContext> {
       if (data.startsWith('acli|')) {
         const nif = data.split('|')[1]!;
         await handleAdminClientChosen(ctx, nif);
+        return;
+      }
+
+      // admin_resumen_produccion — botón del menú admin
+      if (data === 'admin_resumen_produccion') {
+        await sendResumenYProduccion(ctx);
         return;
       }
 

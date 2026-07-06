@@ -28,6 +28,19 @@ export function getTomorrowDate(): string {
   return format(addDays(nowMadrid, 1), 'yyyy-MM-dd');
 }
 
+// Fecha de producción relevante en cada momento:
+// - De madrugada (antes de earlyCutoffHour, p.ej. panaderos entrando a la 1:00) ya se hornea
+//   para el día en curso → se usa la fecha de hoy.
+// - El resto del día (incluida la tarde/noche, cuando se cierra el pedido) se hornea
+//   para el día siguiente → se usa mañana.
+export function getRelevantProductionDate(earlyCutoffHour = 6): string {
+  const nowMadrid = toZonedTime(new Date(), TZ);
+  if (nowMadrid.getHours() < earlyCutoffHour) {
+    return format(nowMadrid, 'yyyy-MM-dd');
+  }
+  return format(addDays(nowMadrid, 1), 'yyyy-MM-dd');
+}
+
 export function getDateForDayName(dayName: string, now?: Date): string {
   const normalized = dayName.toLowerCase().trim();
   const nowMadrid = toZonedTime(now ?? new Date(), TZ);
@@ -47,6 +60,12 @@ export function getDateForDayName(dayName: string, now?: Date): string {
 export function isAfterCutoff(now?: Date): boolean {
   const nowMadrid = toZonedTime(now ?? new Date(), TZ);
   return nowMadrid.getHours() >= config.autoCutoffHour;
+}
+
+// Día de la semana (0=domingo…6=sábado) para una fecha "YYYY-MM-DD", sin desfases de zona horaria
+export function getDayOfWeek(dateStr: string): number {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year!, month! - 1, day!).getDay();
 }
 
 export function formatDateSpanish(dateStr: string): string {
