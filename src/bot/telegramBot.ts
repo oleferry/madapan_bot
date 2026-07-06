@@ -31,6 +31,24 @@ function isStaff(ctx: { from?: { id: number } }): boolean {
   return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
 }
 
+async function sendResumen(ctx: { reply: (text: string) => Promise<unknown> }): Promise<void> {
+  const { toZonedTime, format } = await import('date-fns-tz');
+  const { readTodayChanges, buildSummaryText } = await import('../jobs/dailySummaryJob');
+  const now = toZonedTime(new Date(), config.timezone);
+  const today = format(now, 'yyyy-MM-dd', { timeZone: config.timezone });
+  const entries = readTodayChanges();
+  await ctx.reply(buildSummaryText(entries, today));
+}
+
+async function sendProduccion(ctx: { reply: (text: string) => Promise<unknown> }): Promise<void> {
+  const { getRelevantProductionDate, getDayOfWeek } = await import('../utils/dates');
+  const { buildProductionSummary } = await import('../services/productionSummary');
+  const dateStr = getRelevantProductionDate();
+  await ctx.reply('Calculando producción...');
+  const text = await buildProductionSummary(dateStr, getDayOfWeek(dateStr));
+  await ctx.reply(text);
+}
+
 async function sendResumenYProduccion(ctx: { reply: (text: string) => Promise<unknown> }): Promise<void> {
   const { getRelevantProductionDate, getDayOfWeek, formatDateSpanish } = await import('../utils/dates');
   const { buildProductionSummary } = await import('../services/productionSummary');
@@ -73,24 +91,13 @@ export function createBot(): Telegraf<BotContext> {
   // Resumen de producción bajo demanda (staff — cualquier admin)
   bot.command('produccion', async (ctx) => {
     if (!isStaff(ctx)) return;
-    const { getRelevantProductionDate, getDayOfWeek } = await import('../utils/dates');
-    const { buildProductionSummary } = await import('../services/productionSummary');
-    const dateStr = getRelevantProductionDate();
-    await ctx.reply('Calculando producción...');
-    const text = await buildProductionSummary(dateStr, getDayOfWeek(dateStr));
-    await ctx.reply(text);
+    await sendProduccion(ctx);
   });
 
   // Resumen de cambios bajo demanda (staff — cualquier admin)
   bot.command('resumen', async (ctx) => {
     if (!isStaff(ctx)) return;
-    const { toZonedTime, format } = await import('date-fns-tz');
-    const { readTodayChanges, buildSummaryText } = await import('../jobs/dailySummaryJob');
-    const now = toZonedTime(new Date(), config.timezone);
-    const today = format(now, 'yyyy-MM-dd', { timeZone: config.timezone });
-    const entries = readTodayChanges();
-    const text = buildSummaryText(entries, today);
-    await ctx.reply(text);
+    await sendResumen(ctx);
   });
 
   // Resumen + producción combinados, en un solo comando (staff — cualquier admin)
@@ -98,6 +105,15 @@ export function createBot(): Telegraf<BotContext> {
     if (!isStaff(ctx)) return;
     await sendResumenYProduccion(ctx);
   });
+
+  // Registrar comandos en el menú "/" nativo de Telegram
+  bot.telegram.setMyCommands([
+    { command: 'hola', description: 'Iniciar / menú principal' },
+    { command: 'resumen', description: 'Resumen de cambios de hoy (staff)' },
+    { command: 'produccion', description: 'Producción del día (staff)' },
+    { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
+    { command: 'admin', description: 'Ver mi chat ID' },
+  ]).catch(err => warn('TelegramBot', `setMyCommands failed: ${(err as Error).message}`));
 
   // ── Contact ─────────────────────────────────────────────────────────────────
   bot.on('contact', handleContact);
@@ -249,9 +265,21 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
-      // admin_resumen_produccion — botón del menú admin
+      // admin_resumen_produccion — botón del menú admin (combinado)
       if (data === 'admin_resumen_produccion') {
         await sendResumenYProduccion(ctx);
+        return;
+      }
+
+      // admin_resumen — botón del menú admin (solo resumen de cambios)
+      if (data === 'admin_resumen') {
+        await sendResumen(ctx);
+        return;
+      }
+
+      // admin_produccion — botón del menú admin (solo producción)
+      if (data === 'admin_produccion') {
+        await sendProduccion(ctx);
         return;
       }
 

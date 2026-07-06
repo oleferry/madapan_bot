@@ -142,7 +142,8 @@ async function sendAdminMenu(ctx: BotContext): Promise<void> {
   await ctx.reply(
     `Modo administrador 🔧${clienteActual}\n\n¿Qué deseas hacer?`,
     Markup.inlineKeyboard([
-      [Markup.button.callback('Resumen y producción', 'admin_resumen_produccion')],
+      [Markup.button.callback('Resumen de cambios', 'admin_resumen')],
+      [Markup.button.callback('Producción', 'admin_produccion')],
       [Markup.button.callback('Editar pedido de un cliente', 'admin_select_client')],
       ...(ctx.session.customer
         ? [[Markup.button.callback(`Seguir con ${ctx.session.customer.name}`, 'view_tomorrow')]]
