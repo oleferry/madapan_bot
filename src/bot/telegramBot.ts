@@ -92,7 +92,15 @@ export function createBot(): Telegraf<BotContext> {
   );
 
   // ── Commands ────────────────────────────────────────────────────────────────
-  bot.start(handleStart);
+  bot.start(async (ctx) => {
+    // Deep link t.me/<bot>?start=pizza → entra directo al flujo de reserva de pizza
+    const payload = (ctx as unknown as { startPayload?: string }).startPayload;
+    if (payload === 'pizza') {
+      await handlePizzaStart(ctx);
+      return;
+    }
+    await handleStart(ctx);
+  });
   bot.command('hola', handleStart);
 
   // Comando para obtener el chat ID (para configurar ADMIN_TELEGRAM_IDS)
