@@ -124,11 +124,61 @@ export interface PizzaOrderEntry {
   diaRecogida: string;
   horaRecogida: string;
   precioTotal: number;
+  weekOf: string;
 }
 
 const ORDERS_LOG_PATH = path.resolve('logs/pizza-orders.log');
 
-export function logPizzaOrder(entry: PizzaOrderEntry): void {
+export function logPizzaOrder(entry: Omit<PizzaOrderEntry, 'weekOf'>): void {
   fs.mkdirSync(path.dirname(ORDERS_LOG_PATH), { recursive: true });
-  fs.appendFileSync(ORDERS_LOG_PATH, JSON.stringify(entry) + '\n');
+  const full: PizzaOrderEntry = { ...entry, weekOf: currentWeekendKey() };
+  fs.appendFileSync(ORDERS_LOG_PATH, JSON.stringify(full) + '\n');
+}
+
+function readAllOrders(): PizzaOrderEntry[] {
+  try {
+    if (!fs.existsSync(ORDERS_LOG_PATH)) return [];
+    return fs.readFileSync(ORDERS_LOG_PATH, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map(l => {
+        try { return JSON.parse(l) as PizzaOrderEntry; } catch { return null; }
+      })
+      .filter((e): e is PizzaOrderEntry => e !== null);
+  } catch (err) {
+    warn('PizzaService', `Error leyendo pedidos: ${(err as Error).message}`);
+    return [];
+  }
+}
+
+const DIA_ORDEN: Record<string, number> = { 'Viernes': 0, 'Sábado': 1, 'Domingo': 2 };
+
+// Resumen de las reservas del finde en curso: tipo, día, hora y cliente
+export function buildPizzaOrdersSummary(): string {
+  const weekOf = currentWeekendKey();
+  const orders = readAllOrders().filter(o => o.weekOf === weekOf);
+
+  if (orders.length === 0) {
+    return `🍕 Pedidos de pizza — finde del ${weekOf}\n\nNo hay reservas todavía.`;
+  }
+
+  const sorted = [...orders].sort((a, b) => {
+    const diaDiff = (DIA_ORDEN[a.diaRecogida] ?? 9) - (DIA_ORDEN[b.diaRecogida] ?? 9);
+    if (diaDiff !== 0) return diaDiff;
+    return a.horaRecogida.localeCompare(b.horaRecogida);
+  });
+
+  let totalUnidades = 0;
+  let text = `🍕 Pedidos de pizza — finde del ${weekOf}\n${orders.length} reserva(s)\n\n`;
+  for (const o of sorted) {
+    totalUnidades += o.cantidad;
+    const tipoLabel = o.tipo === 'menu' ? 'Menú' : 'Individual';
+    text += `• ${o.diaRecogida} ${o.horaRecogida} — ${o.cantidad}x ${tipoLabel} ${o.pizzaName} — ${o.nombre} (${o.telefono})\n`;
+  }
+  text += `\nTotal unidades reservadas: ${totalUnidades}`;
+
+  const restante = getRemainingStock();
+  if (restante !== null) text += `\nStock restante: ${restante}`;
+
+  return text;
 }

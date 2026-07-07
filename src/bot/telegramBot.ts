@@ -25,6 +25,8 @@ import {
   handleAdminSelectClient,
   handleAdminByNif,
   handleAdminClientChosen,
+  handleAdminPizzaStockPrompt,
+  handleAdminPizzaPedidos,
 } from './customerFlows';
 import {
   handlePizzaStart,
@@ -133,6 +135,12 @@ export function createBot(): Telegraf<BotContext> {
     await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para este fin de semana.`);
   });
 
+  // Admin: resumen de reservas de pizza del finde en curso
+  bot.command('pedidos_pizzas', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await ctx.reply(pizzaService.buildPizzaOrdersSummary());
+  });
+
   // Registrar comandos en el menú "/" nativo de Telegram
   bot.telegram.setMyCommands([
     { command: 'hola', description: 'Iniciar / menú principal' },
@@ -141,6 +149,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'produccion', description: 'Producción del día (staff)' },
     { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
     { command: 'pizzas_stock', description: 'Fijar stock de pizzas del finde (staff)' },
+    { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
     { command: 'admin', description: 'Ver mi chat ID' },
   ]).catch(err => warn('TelegramBot', `setMyCommands failed: ${(err as Error).message}`));
 
@@ -348,6 +357,18 @@ export function createBot(): Telegraf<BotContext> {
       // pz_hora|HH:mm
       if (data.startsWith('pz_hora|')) {
         await handlePizzaHoraElegida(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // admin_pizzas_stock — botón del menú admin
+      if (data === 'admin_pizzas_stock') {
+        await handleAdminPizzaStockPrompt(ctx);
+        return;
+      }
+
+      // admin_pizzas_pedidos — botón del menú admin
+      if (data === 'admin_pizzas_pedidos') {
+        await handleAdminPizzaPedidos(ctx);
         return;
       }
 

@@ -21,7 +21,8 @@ export interface SessionData {
     | 'admin_awaiting_nif'
     | 'pizza_awaiting_name'
     | 'pizza_awaiting_phone'
-    | 'pizza_awaiting_email';
+    | 'pizza_awaiting_email'
+    | 'admin_awaiting_pizza_stock';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   selectedDate?: string;
@@ -155,6 +156,8 @@ async function sendAdminMenu(ctx: BotContext): Promise<void> {
       [Markup.button.callback('Resumen de cambios', 'admin_resumen')],
       [Markup.button.callback('Producción', 'admin_produccion')],
       [Markup.button.callback('Editar pedido de un cliente', 'admin_select_client')],
+      [Markup.button.callback('Stock de pizzas', 'admin_pizzas_stock')],
+      [Markup.button.callback('Pedidos de pizzas', 'admin_pizzas_pedidos')],
       ...(ctx.session.customer
         ? [[Markup.button.callback(`Seguir con ${ctx.session.customer.name}`, 'view_tomorrow')]]
         : []),
@@ -189,6 +192,16 @@ export async function handleAdminByNif(ctx: BotContext): Promise<void> {
 
 export async function handleAdminClientChosen(ctx: BotContext, nif: string): Promise<void> {
   await adminLoadClient(ctx, nif);
+}
+
+export async function handleAdminPizzaStockPrompt(ctx: BotContext): Promise<void> {
+  ctx.session.step = 'admin_awaiting_pizza_stock';
+  await ctx.reply('¿Cuántas unidades de pizza hay disponibles este fin de semana? Escribe el número:');
+}
+
+export async function handleAdminPizzaPedidos(ctx: BotContext): Promise<void> {
+  const { buildPizzaOrdersSummary } = await import('../services/pizzaService');
+  await ctx.reply(buildPizzaOrdersSummary());
 }
 
 // Carga un cliente por NIF para que el admin opere sobre su pedido
@@ -405,6 +418,20 @@ export async function handleText(ctx: BotContext): Promise<void> {
   if (!ctx.message || !('text' in ctx.message)) return;
   const text = (ctx.message as Message.TextMessage).text;
   try {
+    // Admin: fijar stock de pizzas
+    if (ctx.session.step === 'admin_awaiting_pizza_stock') {
+      const n = parseInt(text.trim(), 10);
+      if (isNaN(n) || n < 0) {
+        await ctx.reply('Por favor escribe un número válido (0 o más):');
+        return;
+      }
+      ctx.session.step = 'idle';
+      const { setWeekendStock } = await import('../services/pizzaService');
+      setWeekendStock(n);
+      await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para este fin de semana.`);
+      return;
+    }
+
     // Admin: cargar cliente por NIF
     if (ctx.session.step === 'admin_awaiting_nif') {
       const nif = text.trim();
