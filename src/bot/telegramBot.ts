@@ -26,6 +26,17 @@ import {
   handleAdminByNif,
   handleAdminClientChosen,
 } from './customerFlows';
+import {
+  handlePizzaStart,
+  handlePizzaTipoElegido,
+  handlePizzaElegida,
+  handlePizzaPostreElegido,
+  handlePizzaCantidadElegida,
+  handlePizzaDiaElegido,
+  handlePizzaHoraElegida,
+  handlePizzaText,
+} from './pizzaFlow';
+import * as pizzaService from '../services/pizzaService';
 
 function isStaff(ctx: { from?: { id: number } }): boolean {
   return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
@@ -106,12 +117,30 @@ export function createBot(): Telegraf<BotContext> {
     await sendResumenYProduccion(ctx);
   });
 
+  // Pizzas — reserva pública, abierta a cualquier usuario
+  bot.command('pizza', handlePizzaStart);
+
+  // Admin: fija el stock de pizzas disponibles para el finde en curso
+  bot.command('pizzas_stock', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const arg = ctx.message.text.split(' ')[1];
+    const n = parseInt(arg ?? '', 10);
+    if (isNaN(n) || n < 0) {
+      await ctx.reply('Uso: /pizzas_stock <número de unidades>\nEjemplo: /pizzas_stock 40');
+      return;
+    }
+    pizzaService.setWeekendStock(n);
+    await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para este fin de semana.`);
+  });
+
   // Registrar comandos en el menú "/" nativo de Telegram
   bot.telegram.setMyCommands([
     { command: 'hola', description: 'Iniciar / menú principal' },
+    { command: 'pizza', description: 'Reservar pizza de fin de semana' },
     { command: 'resumen', description: 'Resumen de cambios de hoy (staff)' },
     { command: 'produccion', description: 'Producción del día (staff)' },
     { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
+    { command: 'pizzas_stock', description: 'Fijar stock de pizzas del finde (staff)' },
     { command: 'admin', description: 'Ver mi chat ID' },
   ]).catch(err => warn('TelegramBot', `setMyCommands failed: ${(err as Error).message}`));
 
@@ -283,6 +312,45 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
+      // pz_tipo|individual|menu
+      if (data.startsWith('pz_tipo|')) {
+        const tipo = data.split('|')[1] as 'individual' | 'menu';
+        await handlePizzaTipoElegido(ctx, tipo);
+        return;
+      }
+
+      // pz_pizza|id
+      if (data.startsWith('pz_pizza|')) {
+        const pizzaId = data.split('|')[1]!;
+        await handlePizzaElegida(ctx, pizzaId);
+        return;
+      }
+
+      // pz_postre|numero|id
+      if (data.startsWith('pz_postre|')) {
+        const parts = data.split('|');
+        await handlePizzaPostreElegido(ctx, parseInt(parts[1]!, 10), parts[2]!);
+        return;
+      }
+
+      // pz_cant|n
+      if (data.startsWith('pz_cant|')) {
+        await handlePizzaCantidadElegida(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+
+      // pz_dia|Día
+      if (data.startsWith('pz_dia|')) {
+        await handlePizzaDiaElegido(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // pz_hora|HH:mm
+      if (data.startsWith('pz_hora|')) {
+        await handlePizzaHoraElegida(ctx, data.split('|')[1]!);
+        return;
+      }
+
       warn('TelegramBot', `Unhandled callback: ${data}`);
     } catch (err) {
       error('TelegramBot', `Callback error for "${data}": ${(err as Error).message}`);
@@ -295,7 +363,11 @@ export function createBot(): Telegraf<BotContext> {
   });
 
   // ── Text messages ───────────────────────────────────────────────────────────
-  bot.on('text', handleText);
+  bot.on('text', async (ctx) => {
+    const handledByPizza = await handlePizzaText(ctx);
+    if (handledByPizza) return;
+    await handleText(ctx);
+  });
 
   // ── Error handler ───────────────────────────────────────────────────────────
   bot.catch((err, ctx) => {

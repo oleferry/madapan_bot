@@ -3,3 +3,4 @@ node_modules/
 logs/
 data/clients.json
 data/weekly-base.json
+data/pizza-stock.json

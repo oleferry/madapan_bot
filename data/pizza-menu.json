@@ -1,0 +1,29 @@
+{
+  "diasDisponibles": ["Viernes", "Sábado", "Domingo"],
+  "horaInicio": "20:00",
+  "horaFin": "22:30",
+  "pizzas": [
+    {
+      "id": "margarita",
+      "name": "Margarita",
+      "ingredientes": ["Tomate", "Mozzarella", "Albahaca fresca", "AOVE"]
+    },
+    {
+      "id": "gocha",
+      "name": "La Gocha",
+      "ingredientes": ["Tomate", "Mozzarella", "Chorizo", "Queso de cabra"]
+    },
+    {
+      "id": "fina",
+      "name": "La Fina",
+      "ingredientes": ["Tomate", "Mozzarella", "Jamón", "Aceitunas", "Champiñones"]
+    }
+  ],
+  "postres": [
+    { "id": "tarta_queso", "name": "Vasito de tarta de queso" },
+    { "id": "tiramisu", "name": "Vasito de tiramisú" }
+  ],
+  "precioIndividual": 14.95,
+  "precioMenu": 22,
+  "menuIncluye": "1 pizza a elegir + 2 vasitos de postre variados (sin bebida)"
+}

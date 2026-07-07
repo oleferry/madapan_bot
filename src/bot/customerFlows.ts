@@ -12,8 +12,18 @@ import { config } from '../config';
 // ── Session ───────────────────────────────────────────────────────────────────
 
 export interface SessionData {
-  step: 'idle' | 'awaiting_phone' | 'selecting_product' | 'selecting_day' | 'entering_exact' | 'admin_awaiting_nif';
+  step:
+    | 'idle'
+    | 'awaiting_phone'
+    | 'selecting_product'
+    | 'selecting_day'
+    | 'entering_exact'
+    | 'admin_awaiting_nif'
+    | 'pizza_awaiting_name'
+    | 'pizza_awaiting_phone'
+    | 'pizza_awaiting_email';
   isAdmin?: boolean;
+  pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   selectedDate?: string;
   selectedOrderId?: string;
   selectedLineId?: string;
