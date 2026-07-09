@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { log, warn } from '../utils/logger';
+import { config } from '../config';
 
 // ── Menu (estático, tracked en git) ──────────────────────────────────────────
 
@@ -51,7 +52,7 @@ interface PizzaStockState {
   usadas: number;
 }
 
-const STOCK_PATH = path.resolve('data/pizza-stock.json');
+const STOCK_PATH = path.resolve(config.pizzaStockPath);
 
 function loadStock(): PizzaStockState {
   try {
@@ -139,7 +140,7 @@ export interface PizzaOrderEntry {
   cancelledBy?: string; // telegramId del cliente o 'admin:<id>'
 }
 
-const ORDERS_LOG_PATH = path.resolve('logs/pizza-orders.log');
+const ORDERS_LOG_PATH = path.resolve(config.pizzaOrdersLogPath);
 
 // Registra el pedido asignándole un número correlativo y devuelve dicho número.
 export function logPizzaOrder(entry: Omit<PizzaOrderEntry, 'weekOf' | 'orderNumber'>): string {

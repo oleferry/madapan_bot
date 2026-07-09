@@ -1,5 +1,14 @@
 import dotenv from 'dotenv';
+import * as path from 'path';
 dotenv.config();
+
+// Directorio para los datos mutables (pedidos, stock, caché, logs). En Railway
+// se apunta al volumen persistente vía DATA_DIR (o RAILWAY_VOLUME_MOUNT_PATH),
+// para que no se pierdan en cada despliegue. Sin definir, se usan las rutas
+// locales de siempre (data/ y logs/).
+const dataDir = process.env['DATA_DIR'] ?? process.env['RAILWAY_VOLUME_MOUNT_PATH'] ?? '';
+const persistPath = (fileName: string, legacy: string): string =>
+  dataDir ? path.join(dataDir, fileName) : legacy;
 
 export const config = {
   telegramBotToken: process.env['TELEGRAM_BOT_TOKEN'] ?? '',
@@ -19,8 +28,10 @@ export const config = {
   dailySummaryHour: parseInt(process.env['DAILY_SUMMARY_HOUR'] ?? '0', 10),
   nodeEnv: process.env['NODE_ENV'] ?? 'development',
   dryRun: process.env['DRY_RUN'] === 'true',
-  clientsCachePath: process.env['CLIENTS_CACHE_PATH'] ?? 'data/clients.json',
-  logPath: process.env['LOG_PATH'] ?? 'logs/changes.log',
+  clientsCachePath: process.env['CLIENTS_CACHE_PATH'] ?? persistPath('clients.json', 'data/clients.json'),
+  logPath: process.env['LOG_PATH'] ?? persistPath('changes.log', 'logs/changes.log'),
+  pizzaOrdersLogPath: process.env['PIZZA_ORDERS_LOG_PATH'] ?? persistPath('pizza-orders.log', 'logs/pizza-orders.log'),
+  pizzaStockPath: process.env['PIZZA_STOCK_PATH'] ?? persistPath('pizza-stock.json', 'data/pizza-stock.json'),
 };
 
 export const isDryRun = config.dryRun;
