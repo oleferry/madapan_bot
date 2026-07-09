@@ -111,11 +111,13 @@ export function consumeStock(units: number): boolean {
 // ── Log de pedidos de pizza ───────────────────────────────────────────────────
 
 export interface PizzaOrderEntry {
+  orderNumber: string;
   timestamp: string;
   telegramId: string;
   nombre: string;
   telefono: string;
   email: string;
+  marketingConsent: boolean;
   tipo: 'individual' | 'menu';
   pizzaId: string;
   pizzaName: string;
@@ -129,10 +131,19 @@ export interface PizzaOrderEntry {
 
 const ORDERS_LOG_PATH = path.resolve('logs/pizza-orders.log');
 
-export function logPizzaOrder(entry: Omit<PizzaOrderEntry, 'weekOf'>): void {
+// Registra el pedido asignándole un número correlativo y devuelve dicho número.
+export function logPizzaOrder(entry: Omit<PizzaOrderEntry, 'weekOf' | 'orderNumber'>): string {
   fs.mkdirSync(path.dirname(ORDERS_LOG_PATH), { recursive: true });
-  const full: PizzaOrderEntry = { ...entry, weekOf: currentWeekendKey() };
+  const orderNumber = nextOrderNumber();
+  const full: PizzaOrderEntry = { ...entry, orderNumber, weekOf: currentWeekendKey() };
   fs.appendFileSync(ORDERS_LOG_PATH, JSON.stringify(full) + '\n');
+  return orderNumber;
+}
+
+// Número de pedido correlativo global, formato PZ-0001.
+function nextOrderNumber(): string {
+  const n = readAllOrders().length + 1;
+  return `PZ-${String(n).padStart(4, '0')}`;
 }
 
 function readAllOrders(): PizzaOrderEntry[] {
@@ -173,7 +184,8 @@ export function buildPizzaOrdersSummary(): string {
   for (const o of sorted) {
     totalUnidades += o.cantidad;
     const tipoLabel = o.tipo === 'menu' ? 'Menú' : 'Individual';
-    text += `• ${o.diaRecogida} ${o.horaRecogida} — ${o.cantidad}x ${tipoLabel} ${o.pizzaName} — ${o.nombre} (${o.telefono})\n`;
+    const ref = o.orderNumber ? `${o.orderNumber} · ` : '';
+    text += `• ${ref}${o.diaRecogida} ${o.horaRecogida} — ${o.cantidad}x ${tipoLabel} ${o.pizzaName} — ${o.nombre} (${o.telefono})\n`;
   }
   text += `\nTotal unidades reservadas: ${totalUnidades}`;
 

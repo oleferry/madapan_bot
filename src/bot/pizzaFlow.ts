@@ -4,6 +4,7 @@ import { BotContext } from './customerFlows';
 import * as pizzaService from '../services/pizzaService';
 import { sendToAdmin } from '../services/notifier';
 import { log, warn } from '../utils/logger';
+import { config } from '../config';
 
 export interface PizzaSessionData {
   tipo?: 'individual' | 'menu';
@@ -14,6 +15,20 @@ export interface PizzaSessionData {
   horaRecogida?: string;
   nombre?: string;
   telefono?: string;
+  email?: string;
+  marketingConsent?: boolean;
+}
+
+// Aviso de protección de datos mostrado antes de recoger datos personales.
+function avisoProteccionDatos(): string {
+  let t = 'ℹ️ Protección de datos\n\n' +
+    'Para gestionar tu reserva, Madapan SL tratará tus datos (nombre, teléfono y email). ';
+  if (config.privacyPolicyUrl) {
+    t += `Puedes consultar cómo los usamos y ejercer tus derechos aquí:\n${config.privacyPolicyUrl}`;
+  } else {
+    t += 'Puedes consultar nuestra política de privacidad o escribirnos a hola@madapan.es.';
+  }
+  return t;
 }
 
 const HORAS = ['20:00', '20:30', '21:00', '21:30', '22:00', '22:30'];
@@ -145,6 +160,7 @@ export async function handlePizzaHoraElegida(ctx: BotContext, hora: string): Pro
   }
   ctx.session.pizzaOrder.horaRecogida = hora;
   ctx.session.step = 'pizza_awaiting_name';
+  await ctx.reply(avisoProteccionDatos());
   await ctx.reply('¿A nombre de quién hacemos la reserva? Escribe tu nombre:');
 }
 
@@ -171,17 +187,40 @@ export async function handlePizzaText(ctx: BotContext): Promise<boolean> {
     if (!order) return true;
     order.telefono = text;
     ctx.session.step = 'pizza_awaiting_email';
-    await ctx.reply('¿Tu email? (para guardarlo en nuestra base de datos)');
+    await ctx.reply('¿Tu email?');
     return true;
   }
 
   if (ctx.session.step === 'pizza_awaiting_email') {
     if (!order) return true;
-    await confirmarPedido(ctx, text);
+    order.email = text;
+    ctx.session.step = 'pizza_awaiting_marketing';
+    await ctx.reply(
+      '¿Quieres recibir promociones y novedades de Madapan por email? Es opcional; podrás darte de baja cuando quieras.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('✅ Sí, quiero recibir promociones', 'pz_promo|si')],
+        [Markup.button.callback('No, gracias', 'pz_promo|no')],
+      ])
+    );
     return true;
   }
 
   return false;
+}
+
+// Registra la respuesta al consentimiento de marketing y finaliza el pedido.
+export async function handlePizzaMarketing(ctx: BotContext, consent: boolean): Promise<void> {
+  const order = ctx.session.pizzaOrder;
+  if (!order || !order.email) {
+    ctx.session.step = 'idle';
+    await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
+    return;
+  }
+  order.marketingConsent = consent;
+  await ctx.reply(consent
+    ? '¡Gracias! Te mantendremos al día de nuestras novedades. 🙌'
+    : 'Perfecto, solo usaremos tus datos para gestionar esta reserva.');
+  await confirmarPedido(ctx, order.email);
 }
 
 async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
@@ -211,12 +250,13 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
 
   const telegramId = String(ctx.from?.id ?? '');
 
-  pizzaService.logPizzaOrder({
+  const orderNumber = pizzaService.logPizzaOrder({
     timestamp: new Date().toISOString(),
     telegramId,
     nombre: order.nombre,
     telefono: order.telefono,
     email,
+    marketingConsent: order.marketingConsent ?? false,
     tipo: order.tipo!,
     pizzaId: order.pizzaId,
     pizzaName: pizza.name,
@@ -227,9 +267,10 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
     precioTotal,
   });
 
-  log('PizzaFlow', `Reserva de pizza: ${order.nombre} — ${order.cantidad}x ${pizza.name} (${order.diaRecogida} ${order.horaRecogida})`);
+  log('PizzaFlow', `Reserva de pizza ${orderNumber}: ${order.nombre} — ${order.cantidad}x ${pizza.name} (${order.diaRecogida} ${order.horaRecogida})`);
 
   let resumen = `✅ ¡Reserva confirmada!\n\n`;
+  resumen += `Número de pedido: ${orderNumber}\n\n`;
   resumen += `${order.cantidad}x ${order.tipo === 'menu' ? 'Menú ' : ''}${pizza.name}\n`;
   if (order.postres && order.postres.length > 0) resumen += `Postres: ${order.postres.join(', ')}\n`;
   resumen += `Recogida: ${order.diaRecogida} a las ${order.horaRecogida}\n`;
@@ -239,12 +280,13 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   await ctx.reply(resumen);
 
   const avisoAdmin =
-    `🍕 Nueva reserva de pizza\n\n` +
+    `🍕 Nueva reserva de pizza — ${orderNumber}\n\n` +
     `👤 ${order.nombre} — ${order.telefono} — ${email}\n` +
     `${order.cantidad}x ${order.tipo === 'menu' ? 'Menú ' : ''}${pizza.name}\n` +
     (order.postres && order.postres.length > 0 ? `Postres: ${order.postres.join(', ')}\n` : '') +
     `Recogida: ${order.diaRecogida} a las ${order.horaRecogida}\n` +
-    `Total: ${precioTotal.toFixed(2)} €`;
+    `Total: ${precioTotal.toFixed(2)} €\n` +
+    `📧 Marketing: ${order.marketingConsent ? 'SÍ acepta promociones' : 'no'}`;
 
   sendToAdmin(avisoAdmin).catch(err => warn('PizzaFlow', `Error notificando a admin: ${(err as Error).message}`));
 
