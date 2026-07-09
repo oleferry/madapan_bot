@@ -357,3 +357,94 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
 
   ctx.session.pizzaOrder = undefined;
 }
+
+// ── Cancelación de reservas ───────────────────────────────────────────────────
+
+function isStaffUser(ctx: BotContext): boolean {
+  return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
+}
+
+// El admin puede cancelar cualquier reserva; el cliente solo la suya.
+function puedeCancelar(ctx: BotContext, o: pizzaService.PizzaOrderEntry): boolean {
+  return isStaffUser(ctx) || o.telegramId === String(ctx.from?.id ?? '');
+}
+
+// Cliente: lista sus reservas activas del finde para cancelar.
+export async function handlePizzaCancelMine(ctx: BotContext): Promise<void> {
+  const telegramId = String(ctx.from?.id ?? '');
+  const orders = pizzaService.getActiveOrdersByTelegramId(telegramId);
+  if (orders.length === 0) {
+    await ctx.reply('No tienes reservas de pizza activas este fin de semana.');
+    return;
+  }
+  const buttons = orders.map(o => [Markup.button.callback(
+    `${o.orderNumber} · ${o.diaRecogida} ${o.horaRecogida} · ${o.cantidadTotal} ud(s)`,
+    `pz_cancel|${o.orderNumber}`,
+  )]);
+  await ctx.reply('¿Qué reserva quieres cancelar?', Markup.inlineKeyboard(buttons));
+}
+
+// Admin: lista todas las reservas activas del finde para cancelar.
+export async function handleAdminCancelPizza(ctx: BotContext): Promise<void> {
+  const orders = pizzaService.getActiveOrdersForWeek();
+  if (orders.length === 0) {
+    await ctx.reply('No hay reservas de pizza activas este fin de semana.');
+    return;
+  }
+  const buttons = orders.map(o => [Markup.button.callback(
+    `${o.orderNumber} · ${o.nombre} · ${o.diaRecogida} ${o.horaRecogida}`,
+    `pz_cancel|${o.orderNumber}`,
+  )]);
+  await ctx.reply('Selecciona la reserva a cancelar:', Markup.inlineKeyboard(buttons));
+}
+
+// Paso de confirmación antes de cancelar.
+export async function handlePizzaCancelPrompt(ctx: BotContext, orderNumber: string): Promise<void> {
+  const o = pizzaService.getOrderByNumber(orderNumber);
+  if (!o || o.cancelled) {
+    await ctx.reply('Esa reserva ya no está disponible.');
+    return;
+  }
+  if (!puedeCancelar(ctx, o)) {
+    await ctx.reply('No tienes permiso para cancelar esta reserva.');
+    return;
+  }
+  await ctx.reply(
+    `¿Seguro que quieres cancelar ${o.orderNumber}?\n${pizzaService.itemsLabel(o.items)} — ${o.diaRecogida} ${o.horaRecogida}`,
+    Markup.inlineKeyboard([
+      [Markup.button.callback('✅ Sí, cancelar', `pz_cancel_ok|${o.orderNumber}`)],
+      [Markup.button.callback('No, volver', 'main_menu')],
+    ])
+  );
+}
+
+// Ejecuta la cancelación (con control de permisos) y avisa a administración.
+export async function handlePizzaCancelConfirm(ctx: BotContext, orderNumber: string): Promise<void> {
+  const existing = pizzaService.getOrderByNumber(orderNumber);
+  if (!existing || existing.cancelled) {
+    await ctx.reply('Esa reserva ya no está disponible.');
+    return;
+  }
+  if (!puedeCancelar(ctx, existing)) {
+    await ctx.reply('No tienes permiso para cancelar esta reserva.');
+    return;
+  }
+
+  const staff = isStaffUser(ctx);
+  const cancelledBy = staff ? `admin:${ctx.from?.id}` : String(ctx.from?.id ?? '');
+  const cancelled = pizzaService.cancelOrder(orderNumber, cancelledBy);
+  if (!cancelled) {
+    await ctx.reply('No se ha podido cancelar (puede que ya estuviera cancelada).');
+    return;
+  }
+
+  await ctx.reply(`✅ Reserva ${orderNumber} cancelada. El stock se ha liberado.`);
+
+  const aviso =
+    `❌ Reserva cancelada — ${orderNumber}\n\n` +
+    `👤 ${cancelled.nombre} (${cancelled.telefono})\n` +
+    `${pizzaService.itemsLabel(cancelled.items)}\n` +
+    `Recogida: ${cancelled.diaRecogida} ${cancelled.horaRecogida}\n` +
+    `Cancelada por: ${staff ? 'administración' : 'el cliente'}`;
+  sendToAdmin(aviso).catch(err => warn('PizzaFlow', `Error notificando cancelación: ${(err as Error).message}`));
+}

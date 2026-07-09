@@ -41,6 +41,10 @@ import {
   handlePizzaMarketing,
   handlePizzaMas,
   handlePizzaSeguir,
+  handlePizzaCancelMine,
+  handleAdminCancelPizza,
+  handlePizzaCancelPrompt,
+  handlePizzaCancelConfirm,
 } from './pizzaFlow';
 import * as pizzaService from '../services/pizzaService';
 
@@ -134,6 +138,9 @@ export function createBot(): Telegraf<BotContext> {
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
+  // Cancelar mi reserva de pizza — pública (cada uno solo ve las suyas)
+  bot.command('cancelar_pizza', handlePizzaCancelMine);
+
   // Admin: fija el stock de pizzas disponibles para el finde en curso
   bot.command('pizzas_stock', async (ctx) => {
     if (!isStaff(ctx)) return;
@@ -159,6 +166,7 @@ export function createBot(): Telegraf<BotContext> {
   const publicCommands = [
     { command: 'hola', description: 'Iniciar / menú principal' },
     { command: 'pizza', description: 'Reservar pizza de fin de semana' },
+    { command: 'cancelar_pizza', description: 'Cancelar mi reserva de pizza' },
     { command: 'admin', description: 'Ver mi chat ID' },
   ];
   const staffCommands = [
@@ -334,7 +342,7 @@ export function createBot(): Telegraf<BotContext> {
       const adminCallbacks = [
         'admin_select_client', 'admin_by_nif',
         'admin_resumen_produccion', 'admin_resumen', 'admin_produccion',
-        'admin_pizzas_stock', 'admin_pizzas_pedidos',
+        'admin_pizzas_stock', 'admin_pizzas_pedidos', 'admin_cancel_pizza',
       ];
       if ((adminCallbacks.includes(data) || data.startsWith('acli|')) && !isStaff(ctx)) {
         warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
@@ -402,6 +410,30 @@ export function createBot(): Telegraf<BotContext> {
       // pz_cant|n
       if (data.startsWith('pz_cant|')) {
         await handlePizzaCantidadElegida(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+
+      // pz_cancel_mine — cliente: cancelar mi reserva
+      if (data === 'pz_cancel_mine') {
+        await handlePizzaCancelMine(ctx);
+        return;
+      }
+
+      // admin_cancel_pizza — admin: cancelar cualquier reserva (guard isStaff arriba)
+      if (data === 'admin_cancel_pizza') {
+        await handleAdminCancelPizza(ctx);
+        return;
+      }
+
+      // pz_cancel_ok|PZ-XXXX — confirmar cancelación (antes que pz_cancel|)
+      if (data.startsWith('pz_cancel_ok|')) {
+        await handlePizzaCancelConfirm(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // pz_cancel|PZ-XXXX — pedir confirmación de cancelación
+      if (data.startsWith('pz_cancel|')) {
+        await handlePizzaCancelPrompt(ctx, data.split('|')[1]!);
         return;
       }
 
