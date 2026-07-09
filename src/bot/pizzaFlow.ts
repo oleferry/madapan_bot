@@ -250,7 +250,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
 
   const telegramId = String(ctx.from?.id ?? '');
 
-  pizzaService.logPizzaOrder({
+  const orderNumber = pizzaService.logPizzaOrder({
     timestamp: new Date().toISOString(),
     telegramId,
     nombre: order.nombre,
@@ -267,9 +267,10 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
     precioTotal,
   });
 
-  log('PizzaFlow', `Reserva de pizza: ${order.nombre} — ${order.cantidad}x ${pizza.name} (${order.diaRecogida} ${order.horaRecogida})`);
+  log('PizzaFlow', `Reserva de pizza ${orderNumber}: ${order.nombre} — ${order.cantidad}x ${pizza.name} (${order.diaRecogida} ${order.horaRecogida})`);
 
   let resumen = `✅ ¡Reserva confirmada!\n\n`;
+  resumen += `Número de pedido: ${orderNumber}\n\n`;
   resumen += `${order.cantidad}x ${order.tipo === 'menu' ? 'Menú ' : ''}${pizza.name}\n`;
   if (order.postres && order.postres.length > 0) resumen += `Postres: ${order.postres.join(', ')}\n`;
   resumen += `Recogida: ${order.diaRecogida} a las ${order.horaRecogida}\n`;
@@ -279,7 +280,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   await ctx.reply(resumen);
 
   const avisoAdmin =
-    `🍕 Nueva reserva de pizza\n\n` +
+    `🍕 Nueva reserva de pizza — ${orderNumber}\n\n` +
     `👤 ${order.nombre} — ${order.telefono} — ${email}\n` +
     `${order.cantidad}x ${order.tipo === 'menu' ? 'Menú ' : ''}${pizza.name}\n` +
     (order.postres && order.postres.length > 0 ? `Postres: ${order.postres.join(', ')}\n` : '') +
