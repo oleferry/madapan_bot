@@ -27,6 +27,7 @@ import {
   handleAdminClientChosen,
   handleAdminPizzaStockPrompt,
   handleAdminPizzaPedidos,
+  handleIdentifyClient,
 } from './customerFlows';
 import {
   handlePizzaStart,
@@ -149,17 +150,37 @@ export function createBot(): Telegraf<BotContext> {
     await ctx.reply(pizzaService.buildPizzaOrdersSummary());
   });
 
-  // Registrar comandos en el menú "/" nativo de Telegram
-  bot.telegram.setMyCommands([
+  // Registrar comandos en el menú "/" nativo de Telegram.
+  // Los comandos de staff se registran SOLO en el chat de cada admin, usando el
+  // scope de Telegram, para que los clientes no los vean en su menú.
+  const publicCommands = [
     { command: 'hola', description: 'Iniciar / menú principal' },
     { command: 'pizza', description: 'Reservar pizza de fin de semana' },
+    { command: 'admin', description: 'Ver mi chat ID' },
+  ];
+  const staffCommands = [
+    ...publicCommands,
     { command: 'resumen', description: 'Resumen de cambios de hoy (staff)' },
     { command: 'produccion', description: 'Producción del día (staff)' },
     { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
     { command: 'pizzas_stock', description: 'Fijar stock de pizzas del finde (staff)' },
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
-    { command: 'admin', description: 'Ver mi chat ID' },
-  ]).catch(err => warn('TelegramBot', `setMyCommands failed: ${(err as Error).message}`));
+  ];
+
+  // Comandos públicos → visibles para todos los usuarios (scope por defecto)
+  bot.telegram.setMyCommands(publicCommands)
+    .catch(err => warn('TelegramBot', `setMyCommands (public) failed: ${(err as Error).message}`));
+
+  // Comandos de staff → visibles solo en el chat de cada admin
+  for (const adminId of config.adminTelegramIds) {
+    const chatId = Number(adminId);
+    if (Number.isNaN(chatId)) {
+      warn('TelegramBot', `ADMIN_TELEGRAM_IDS contiene un id no numérico: "${adminId}"`);
+      continue;
+    }
+    bot.telegram.setMyCommands(staffCommands, { scope: { type: 'chat', chat_id: chatId } })
+      .catch(err => warn('TelegramBot', `setMyCommands (staff ${adminId}) failed: ${(err as Error).message}`));
+  }
 
   // ── Contact ─────────────────────────────────────────────────────────────────
   bot.on('contact', handleContact);
@@ -174,6 +195,18 @@ export function createBot(): Telegraf<BotContext> {
 
       if (data === 'main_menu') {
         await handleMainMenu(ctx);
+        return;
+      }
+
+      // start_pizza — botón "Reservar pizza" del menú de bienvenida (público)
+      if (data === 'start_pizza') {
+        await handlePizzaStart(ctx);
+        return;
+      }
+
+      // identify_client — botón "Ya soy cliente de Madapan" (identificación por DNI)
+      if (data === 'identify_client') {
+        await handleIdentifyClient(ctx);
         return;
       }
 
@@ -289,6 +322,19 @@ export function createBot(): Telegraf<BotContext> {
       // order_history
       if (data === 'order_history') {
         await handleOrderHistory(ctx);
+        return;
+      }
+
+      // Acciones de administrador — verificación de permisos (defensa en profundidad).
+      // Estos botones solo se envían a admins, pero bloqueamos también el callback
+      // por si alguien intentara dispararlo de forma fabricada.
+      const adminCallbacks = [
+        'admin_select_client', 'admin_by_nif',
+        'admin_resumen_produccion', 'admin_resumen', 'admin_produccion',
+        'admin_pizzas_stock', 'admin_pizzas_pedidos',
+      ];
+      if ((adminCallbacks.includes(data) || data.startsWith('acli|')) && !isStaff(ctx)) {
+        warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
         return;
       }
 

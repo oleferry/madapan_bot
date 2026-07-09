@@ -65,11 +65,8 @@ export async function handleStart(ctx: BotContext): Promise<void> {
       return;
     }
 
-    ctx.session.step = 'awaiting_phone';
-    await ctx.reply(
-      'Hola! Soy el bot de Madapan 🥖\n\nDesde aquí puedes consultar y modificar las cantidades de tus pedidos.\n\n⚠️ Los panes especiales (centeno, semillas, integral, pasas y nueces) necesitan al menos 24 horas de antelación — no se pueden añadir para el día siguiente.\n\nPara empezar, escribe tu NIF o CIF:',
-      Markup.removeKeyboard()
-    );
+    // Usuario sin identificar → menú de bienvenida (pizza / identificarse)
+    await sendWelcomeMenu(ctx);
   } catch (err) {
     warn('CustomerFlows', `handleStart error: ${(err as Error).message}`);
     await ctx.reply('Ha ocurrido un error. Por favor inténtalo de nuevo más tarde.');
@@ -133,15 +130,48 @@ async function sendMainMenu(ctx: BotContext, name: string): Promise<void> {
   );
 }
 
+// Menú de bienvenida para usuarios SIN identificar: solo reserva de pizzas
+// (pública) y la opción de identificarse como cliente de Madapan con su DNI.
+async function sendWelcomeMenu(ctx: BotContext): Promise<void> {
+  ctx.session.step = 'idle';
+  await ctx.reply(
+    'Hola! Soy el bot de Madapan 🥖\n\n¿Qué deseas hacer?',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('🍕 Reservar pizza de fin de semana', 'start_pizza')],
+      [Markup.button.callback('🥖 Ya soy cliente de Madapan', 'identify_client')],
+    ])
+  );
+}
+
+// Inicia la identificación por DNI/CIF de un cliente de Madapan.
+export async function handleIdentifyClient(ctx: BotContext): Promise<void> {
+  ctx.session.step = 'awaiting_phone';
+  await ctx.reply(
+    'Para acceder a tus pedidos, escribe tu NIF o CIF (por ejemplo: 12345678A o B12345678):',
+    Markup.removeKeyboard()
+  );
+}
+
 export async function handleMainMenu(ctx: BotContext): Promise<void> {
-  // Si es admin y aún no ha elegido cliente, volver al menú de admin
-  if (ctx.session.isAdmin && !ctx.session.customer) {
+  const telegramId = String(ctx.from?.id ?? '');
+
+  // Admin sin cliente cargado → menú de administrador
+  if ((ctx.session.isAdmin || config.adminTelegramIds.includes(telegramId)) && !ctx.session.customer) {
+    ctx.session.isAdmin = true;
     await sendAdminMenu(ctx);
     return;
   }
-  const customer = await resolveCustomer(ctx);
-  if (!customer) return;
-  await sendMainMenu(ctx, customer.name);
+
+  // Cliente identificado → su menú de pedidos
+  const customer = ctx.session.customer ?? clientCache.getClient(telegramId);
+  if (customer) {
+    ctx.session.customer = customer;
+    await sendMainMenu(ctx, customer.name);
+    return;
+  }
+
+  // Usuario sin identificar → menú de bienvenida (pizza / identificarse)
+  await sendWelcomeMenu(ctx);
 }
 
 // ── Admin menu ──────────────────────────────────────────────────────────────────
@@ -478,16 +508,16 @@ export async function handleText(ctx: BotContext): Promise<void> {
       return;
     }
 
-    const customer = await resolveCustomer(ctx);
-    if (!customer) {
-      // Cliente nuevo — arrancar registro automáticamente sin necesidad de comando
-      ctx.session.step = 'awaiting_phone';
-      await ctx.reply(
-        'Hola! Soy el bot de Madapan 🥖\n\nDesde aquí puedes consultar y modificar las cantidades de tus pedidos.\n\n⚠️ Los panes especiales (centeno, semillas, integral, pasas y nueces) necesitan al menos 24 horas de antelación — no se pueden añadir para el día siguiente.\n\nPara empezar, escribe tu NIF o CIF:',
-        Markup.removeKeyboard()
-      );
+    // Usuario sin identificar (y fuera del flujo de pizza) → menú de bienvenida
+    const telegramId = String(ctx.from?.id ?? '');
+    const isAdminUser = ctx.session.isAdmin || config.adminTelegramIds.includes(telegramId);
+    if (!ctx.session.customer && !clientCache.getClient(telegramId) && !isAdminUser) {
+      await sendWelcomeMenu(ctx);
       return;
     }
+
+    const customer = await resolveCustomer(ctx);
+    if (!customer) return;
 
     // Handle quantity for adding a new product
     if (ctx.session.step === 'entering_exact' && ctx.session.addingProduct && ctx.session.selectedLineId) {
@@ -887,6 +917,7 @@ async function resolveCustomer(ctx: BotContext): Promise<Customer | null> {
     return null;
   }
 
-  await ctx.reply('No estás registrado. Usa /start para comenzar.');
+  // Usuario sin identificar → menú de bienvenida (pizza / identificarse)
+  await sendWelcomeMenu(ctx);
   return null;
 }
