@@ -508,7 +508,12 @@ export function createBot(): Telegraf<BotContext> {
 export async function launchBot(): Promise<Telegraf<BotContext>> {
   const bot = createBot();
   log('TelegramBot', 'Starting bot...');
-  await bot.launch();
-  log('TelegramBot', 'Bot launched successfully');
+  // bot.launch() no se resuelve mientras el bot esté vivo (el polling es un
+  // bucle infinito) — no se espera, para no bloquear el resto del arranque
+  // (scheduleDailySummary/scheduleProductionSummary, que inicializan el
+  // notificador de admin).
+  bot.launch()
+    .then(() => log('TelegramBot', 'Bot launched successfully'))
+    .catch(err => error('TelegramBot', `Bot launch failed: ${(err as Error).message}`));
   return bot;
 }
