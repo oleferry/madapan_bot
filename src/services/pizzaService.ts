@@ -110,6 +110,16 @@ export function consumeStock(units: number): boolean {
 
 // ── Log de pedidos de pizza ───────────────────────────────────────────────────
 
+// Una línea del pedido (una variante de pizza con su cantidad)
+export interface PizzaOrderItem {
+  tipo: 'individual' | 'menu';
+  pizzaId: string;
+  pizzaName: string;
+  postres: string[];
+  cantidad: number;
+  precioUnidad: number;
+}
+
 export interface PizzaOrderEntry {
   orderNumber: string;
   timestamp: string;
@@ -118,14 +128,11 @@ export interface PizzaOrderEntry {
   telefono: string;
   email: string;
   marketingConsent: boolean;
-  tipo: 'individual' | 'menu';
-  pizzaId: string;
-  pizzaName: string;
-  postres: string[];
-  cantidad: number;
+  items: PizzaOrderItem[];
+  cantidadTotal: number;
+  precioTotal: number;
   diaRecogida: string;
   horaRecogida: string;
-  precioTotal: number;
   weekOf: string;
 }
 
@@ -146,6 +153,51 @@ function nextOrderNumber(): string {
   return `PZ-${String(n).padStart(4, '0')}`;
 }
 
+// Normaliza una entrada del log al formato con items[]. Los pedidos antiguos
+// guardaban una sola pizza en campos planos (tipo/pizzaId/cantidad/...).
+function normalizeOrder(raw: Record<string, unknown>): PizzaOrderEntry {
+  const o = raw as Partial<PizzaOrderEntry> & {
+    tipo?: 'individual' | 'menu'; pizzaId?: string; pizzaName?: string;
+    postres?: string[]; cantidad?: number;
+  };
+
+  let items: PizzaOrderItem[];
+  if (Array.isArray(o.items)) {
+    items = o.items;
+  } else if (o.pizzaId) {
+    const cantidad = o.cantidad ?? 1;
+    const precioUnidad = o.precioTotal && cantidad ? o.precioTotal / cantidad : 0;
+    items = [{
+      tipo: o.tipo ?? 'individual',
+      pizzaId: o.pizzaId,
+      pizzaName: o.pizzaName ?? o.pizzaId,
+      postres: o.postres ?? [],
+      cantidad,
+      precioUnidad,
+    }];
+  } else {
+    items = [];
+  }
+
+  const cantidadTotal = o.cantidadTotal ?? items.reduce((s, i) => s + i.cantidad, 0);
+
+  return {
+    orderNumber: o.orderNumber ?? '',
+    timestamp: o.timestamp ?? '',
+    telegramId: o.telegramId ?? '',
+    nombre: o.nombre ?? '',
+    telefono: o.telefono ?? '',
+    email: o.email ?? '',
+    marketingConsent: o.marketingConsent ?? false,
+    items,
+    cantidadTotal,
+    precioTotal: o.precioTotal ?? 0,
+    diaRecogida: o.diaRecogida ?? '',
+    horaRecogida: o.horaRecogida ?? '',
+    weekOf: o.weekOf ?? '',
+  };
+}
+
 function readAllOrders(): PizzaOrderEntry[] {
   try {
     if (!fs.existsSync(ORDERS_LOG_PATH)) return [];
@@ -153,7 +205,7 @@ function readAllOrders(): PizzaOrderEntry[] {
       .split('\n')
       .filter(Boolean)
       .map(l => {
-        try { return JSON.parse(l) as PizzaOrderEntry; } catch { return null; }
+        try { return normalizeOrder(JSON.parse(l)); } catch { return null; }
       })
       .filter((e): e is PizzaOrderEntry => e !== null);
   } catch (err) {
@@ -164,7 +216,14 @@ function readAllOrders(): PizzaOrderEntry[] {
 
 const DIA_ORDEN: Record<string, number> = { 'Viernes': 0, 'Sábado': 1, 'Domingo': 2 };
 
-// Resumen de las reservas del finde en curso: tipo, día, hora y cliente
+// Etiqueta legible de las líneas de un pedido, p.ej. "2x Menú Margarita, 1x Diavola"
+export function itemsLabel(items: PizzaOrderItem[]): string {
+  return items
+    .map(it => `${it.cantidad}x ${it.tipo === 'menu' ? 'Menú ' : ''}${it.pizzaName}`)
+    .join(', ');
+}
+
+// Resumen de las reservas del finde en curso: día, hora, líneas y cliente
 export function buildPizzaOrdersSummary(): string {
   const weekOf = currentWeekendKey();
   const orders = readAllOrders().filter(o => o.weekOf === weekOf);
@@ -182,10 +241,9 @@ export function buildPizzaOrdersSummary(): string {
   let totalUnidades = 0;
   let text = `🍕 Pedidos de pizza — finde del ${weekOf}\n${orders.length} reserva(s)\n\n`;
   for (const o of sorted) {
-    totalUnidades += o.cantidad;
-    const tipoLabel = o.tipo === 'menu' ? 'Menú' : 'Individual';
+    totalUnidades += o.cantidadTotal;
     const ref = o.orderNumber ? `${o.orderNumber} · ` : '';
-    text += `• ${ref}${o.diaRecogida} ${o.horaRecogida} — ${o.cantidad}x ${tipoLabel} ${o.pizzaName} — ${o.nombre} (${o.telefono})\n`;
+    text += `• ${ref}${o.diaRecogida} ${o.horaRecogida} — ${itemsLabel(o.items)} — ${o.nombre} (${o.telefono})\n`;
   }
   text += `\nTotal unidades reservadas: ${totalUnidades}`;
 
