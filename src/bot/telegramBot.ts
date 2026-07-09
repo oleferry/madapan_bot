@@ -38,6 +38,7 @@ import {
   handlePizzaDiaElegido,
   handlePizzaHoraElegida,
   handlePizzaText,
+  handlePizzaMarketing,
 } from './pizzaFlow';
 import * as pizzaService from '../services/pizzaService';
 
@@ -411,6 +412,12 @@ export function createBot(): Telegraf<BotContext> {
       // pz_hora|HH:mm
       if (data.startsWith('pz_hora|')) {
         await handlePizzaHoraElegida(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // pz_promo|si|no — consentimiento de marketing (protección de datos)
+      if (data.startsWith('pz_promo|')) {
+        await handlePizzaMarketing(ctx, data.split('|')[1] === 'si');
         return;
       }
 

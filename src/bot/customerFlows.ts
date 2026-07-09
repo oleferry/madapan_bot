@@ -22,6 +22,7 @@ export interface SessionData {
     | 'pizza_awaiting_name'
     | 'pizza_awaiting_phone'
     | 'pizza_awaiting_email'
+    | 'pizza_awaiting_marketing'
     | 'admin_awaiting_pizza_stock';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;

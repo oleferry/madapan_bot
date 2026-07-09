@@ -116,6 +116,7 @@ export interface PizzaOrderEntry {
   nombre: string;
   telefono: string;
   email: string;
+  marketingConsent: boolean;
   tipo: 'individual' | 'menu';
   pizzaId: string;
   pizzaName: string;
