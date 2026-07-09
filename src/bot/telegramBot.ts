@@ -39,6 +39,8 @@ import {
   handlePizzaHoraElegida,
   handlePizzaText,
   handlePizzaMarketing,
+  handlePizzaMas,
+  handlePizzaSeguir,
 } from './pizzaFlow';
 import * as pizzaService from '../services/pizzaService';
 
@@ -400,6 +402,18 @@ export function createBot(): Telegraf<BotContext> {
       // pz_cant|n
       if (data.startsWith('pz_cant|')) {
         await handlePizzaCantidadElegida(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+
+      // pz_mas — añadir otra pizza al carrito
+      if (data === 'pz_mas') {
+        await handlePizzaMas(ctx);
+        return;
+      }
+
+      // pz_seguir — continuar con la recogida
+      if (data === 'pz_seguir') {
+        await handlePizzaSeguir(ctx);
         return;
       }
 

@@ -7,10 +7,14 @@ import { log, warn } from '../utils/logger';
 import { config } from '../config';
 
 export interface PizzaSessionData {
+  // Carrito: líneas ya confirmadas del pedido
+  items: import('../services/pizzaService').PizzaOrderItem[];
+  // Línea en construcción (aún no añadida al carrito)
   tipo?: 'individual' | 'menu';
   pizzaId?: string;
   postres?: string[];
   cantidad?: number;
+  // Datos del pedido (una sola vez para todo el carrito)
   diaRecogida?: string;
   horaRecogida?: string;
   nombre?: string;
@@ -44,7 +48,7 @@ export async function handlePizzaStart(ctx: BotContext): Promise<void> {
     return;
   }
 
-  ctx.session.pizzaOrder = {};
+  ctx.session.pizzaOrder = { items: [] };
   ctx.session.step = 'idle';
 
   let text = `🍕 *Pizzas Madapan*\n\n`;
@@ -67,8 +71,20 @@ export async function handlePizzaStart(ctx: BotContext): Promise<void> {
   });
 }
 
+// Muestra los botones de tipo de pizza (usado al empezar y al "añadir otra")
+async function pedirTipo(ctx: BotContext): Promise<void> {
+  await ctx.reply(
+    '¿Qué quieres añadir?',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('Pizza individual', 'pz_tipo|individual')],
+      [Markup.button.callback('Menú Pizza Madapan', 'pz_tipo|menu')],
+      [Markup.button.callback('Cancelar', 'main_menu')],
+    ])
+  );
+}
+
 export async function handlePizzaTipoElegido(ctx: BotContext, tipo: 'individual' | 'menu'): Promise<void> {
-  ctx.session.pizzaOrder = { ...ctx.session.pizzaOrder, tipo };
+  ctx.session.pizzaOrder = { ...(ctx.session.pizzaOrder ?? { items: [] }), tipo };
   const menu = pizzaService.getMenu();
   const buttons = menu.pizzas.map(p => [Markup.button.callback(p.name, `pz_pizza|${p.id}`)]);
   buttons.push([Markup.button.callback('Cancelar', 'main_menu')]);
@@ -81,7 +97,7 @@ export async function handlePizzaElegida(ctx: BotContext, pizzaId: string): Prom
     await ctx.reply('Pizza no encontrada.');
     return;
   }
-  ctx.session.pizzaOrder = { ...ctx.session.pizzaOrder, pizzaId, postres: [] };
+  ctx.session.pizzaOrder = { ...(ctx.session.pizzaOrder ?? { items: [] }), pizzaId, postres: [] };
 
   if (ctx.session.pizzaOrder!.tipo === 'menu') {
     await pedirPostre(ctx, 1);
@@ -128,15 +144,68 @@ async function pedirCantidad(ctx: BotContext): Promise<void> {
 }
 
 export async function handlePizzaCantidadElegida(ctx: BotContext, cantidad: number): Promise<void> {
+  const order = ctx.session.pizzaOrder;
+  if (!order) {
+    await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
+    return;
+  }
+  order.cantidad = cantidad;
+  pushCurrentItem(order);
+  await preguntarAnadirMas(ctx);
+}
+
+// Añade la línea en construcción al carrito y limpia los campos temporales.
+function pushCurrentItem(order: PizzaSessionData): void {
+  if (!order.tipo || !order.pizzaId || !order.cantidad) return;
+  const pizza = pizzaService.getPizzaById(order.pizzaId);
+  const menu = pizzaService.getMenu();
+  const precioUnidad = order.tipo === 'menu' ? menu.precioMenu : menu.precioIndividual;
+  order.items.push({
+    tipo: order.tipo,
+    pizzaId: order.pizzaId,
+    pizzaName: pizza?.name ?? order.pizzaId,
+    postres: order.postres ?? [],
+    cantidad: order.cantidad,
+    precioUnidad,
+  });
+  order.tipo = undefined;
+  order.pizzaId = undefined;
+  order.postres = undefined;
+  order.cantidad = undefined;
+}
+
+// Muestra el carrito actual y ofrece añadir otra pizza o continuar.
+async function preguntarAnadirMas(ctx: BotContext): Promise<void> {
+  const order = ctx.session.pizzaOrder!;
+  const resumen = pizzaService.itemsLabel(order.items);
+  await ctx.reply(
+    `🛒 Tu pedido: ${resumen}\n\n¿Quieres añadir otra pizza o continuar con la recogida?`,
+    Markup.inlineKeyboard([
+      [Markup.button.callback('➕ Añadir otra pizza', 'pz_mas')],
+      [Markup.button.callback('✅ Continuar con la recogida', 'pz_seguir')],
+    ])
+  );
+}
+
+// "Añadir otra pizza" → vuelve a la selección de tipo
+export async function handlePizzaMas(ctx: BotContext): Promise<void> {
   if (!ctx.session.pizzaOrder) {
     await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
     return;
   }
-  ctx.session.pizzaOrder.cantidad = cantidad;
+  await pedirTipo(ctx);
+}
 
+// "Continuar con la recogida" → pide el día
+export async function handlePizzaSeguir(ctx: BotContext): Promise<void> {
+  const order = ctx.session.pizzaOrder;
+  if (!order || order.items.length === 0) {
+    await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
+    return;
+  }
   const menu = pizzaService.getMenu();
   const buttons = menu.diasDisponibles.map(d => [Markup.button.callback(d, `pz_dia|${d}`)]);
-  await ctx.reply('¿Qué día quieres recogerla?', Markup.inlineKeyboard(buttons));
+  await ctx.reply('¿Qué día quieres recogerlo?', Markup.inlineKeyboard(buttons));
 }
 
 export async function handlePizzaDiaElegido(ctx: BotContext, dia: string): Promise<void> {
@@ -227,22 +296,15 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   const order = ctx.session.pizzaOrder;
   ctx.session.step = 'idle';
 
-  if (!order || !order.pizzaId || !order.cantidad || !order.diaRecogida || !order.horaRecogida || !order.nombre || !order.telefono) {
+  if (!order || order.items.length === 0 || !order.diaRecogida || !order.horaRecogida || !order.nombre || !order.telefono) {
     await ctx.reply('Faltan datos del pedido. Escribe /pizza para empezar de nuevo.');
     return;
   }
 
-  const pizza = pizzaService.getPizzaById(order.pizzaId);
-  if (!pizza) {
-    await ctx.reply('Error interno. Escribe /pizza para empezar de nuevo.');
-    return;
-  }
+  const cantidadTotal = order.items.reduce((s, i) => s + i.cantidad, 0);
+  const precioTotal = order.items.reduce((s, i) => s + i.precioUnidad * i.cantidad, 0);
 
-  const menu = pizzaService.getMenu();
-  const precioUnidad = order.tipo === 'menu' ? menu.precioMenu : menu.precioIndividual;
-  const precioTotal = precioUnidad * order.cantidad;
-
-  const ok = pizzaService.consumeStock(order.cantidad);
+  const ok = pizzaService.consumeStock(cantidadTotal);
   if (!ok) {
     await ctx.reply('😔 Lo sentimos, no queda stock suficiente para esa cantidad. Prueba con menos unidades o contacta con Madapan: 722 833 052.');
     return;
@@ -257,22 +319,26 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
     telefono: order.telefono,
     email,
     marketingConsent: order.marketingConsent ?? false,
-    tipo: order.tipo!,
-    pizzaId: order.pizzaId,
-    pizzaName: pizza.name,
-    postres: order.postres ?? [],
-    cantidad: order.cantidad,
+    items: order.items,
+    cantidadTotal,
+    precioTotal,
     diaRecogida: order.diaRecogida,
     horaRecogida: order.horaRecogida,
-    precioTotal,
   });
 
-  log('PizzaFlow', `Reserva de pizza ${orderNumber}: ${order.nombre} — ${order.cantidad}x ${pizza.name} (${order.diaRecogida} ${order.horaRecogida})`);
+  log('PizzaFlow', `Reserva de pizza ${orderNumber}: ${order.nombre} — ${pizzaService.itemsLabel(order.items)} (${order.diaRecogida} ${order.horaRecogida})`);
+
+  const lineasTexto = order.items
+    .map(it => {
+      let l = `${it.cantidad}x ${it.tipo === 'menu' ? 'Menú ' : ''}${it.pizzaName}`;
+      if (it.postres.length > 0) l += ` (postres: ${it.postres.join(', ')})`;
+      return l;
+    })
+    .join('\n');
 
   let resumen = `✅ ¡Reserva confirmada!\n\n`;
   resumen += `Número de pedido: ${orderNumber}\n\n`;
-  resumen += `${order.cantidad}x ${order.tipo === 'menu' ? 'Menú ' : ''}${pizza.name}\n`;
-  if (order.postres && order.postres.length > 0) resumen += `Postres: ${order.postres.join(', ')}\n`;
+  resumen += `${lineasTexto}\n`;
   resumen += `Recogida: ${order.diaRecogida} a las ${order.horaRecogida}\n`;
   resumen += `Total: ${precioTotal.toFixed(2)} €\n\n`;
   resumen += `Pago en el local al recoger. ¡Te esperamos! 🍕`;
@@ -282,8 +348,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   const avisoAdmin =
     `🍕 Nueva reserva de pizza — ${orderNumber}\n\n` +
     `👤 ${order.nombre} — ${order.telefono} — ${email}\n` +
-    `${order.cantidad}x ${order.tipo === 'menu' ? 'Menú ' : ''}${pizza.name}\n` +
-    (order.postres && order.postres.length > 0 ? `Postres: ${order.postres.join(', ')}\n` : '') +
+    `${lineasTexto}\n` +
     `Recogida: ${order.diaRecogida} a las ${order.horaRecogida}\n` +
     `Total: ${precioTotal.toFixed(2)} €\n` +
     `📧 Marketing: ${order.marketingConsent ? 'SÍ acepta promociones' : 'no'}`;
