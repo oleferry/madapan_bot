@@ -5,12 +5,17 @@ import { HoldedLine } from '../src/types';
 
 const makeLine = (name: string, units: number): HoldedLine => ({
   id: 'line-1',
+  productId: 'prod-1',
+  variantId: 'var-1',
   sku: 'SKU001',
   name,
   units,
   price: 1,
+  rawPrice: '1,00',
+  rawDiscount: '0',
   discount: 0,
-  tax: 0,
+  taxes: [],
+  _raw: {},
 });
 
 describe('getThreshold', () => {
