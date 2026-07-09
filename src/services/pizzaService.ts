@@ -134,6 +134,9 @@ export interface PizzaOrderEntry {
   diaRecogida: string;
   horaRecogida: string;
   weekOf: string;
+  cancelled?: boolean;
+  cancelledAt?: string;
+  cancelledBy?: string; // telegramId del cliente o 'admin:<id>'
 }
 
 const ORDERS_LOG_PATH = path.resolve('logs/pizza-orders.log');
@@ -195,7 +198,23 @@ function normalizeOrder(raw: Record<string, unknown>): PizzaOrderEntry {
     diaRecogida: o.diaRecogida ?? '',
     horaRecogida: o.horaRecogida ?? '',
     weekOf: o.weekOf ?? '',
+    cancelled: o.cancelled ?? false,
+    cancelledAt: o.cancelledAt,
+    cancelledBy: o.cancelledBy,
   };
+}
+
+// Lee las líneas del log como objetos crudos (sin normalizar), para poder
+// reescribir el fichero conservando el formato original de cada entrada.
+function readRawLines(): Record<string, unknown>[] {
+  if (!fs.existsSync(ORDERS_LOG_PATH)) return [];
+  return fs.readFileSync(ORDERS_LOG_PATH, 'utf-8')
+    .split('\n')
+    .filter(Boolean)
+    .map(l => {
+      try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; }
+    })
+    .filter((e): e is Record<string, unknown> => e !== null);
 }
 
 function readAllOrders(): PizzaOrderEntry[] {
@@ -226,7 +245,7 @@ export function itemsLabel(items: PizzaOrderItem[]): string {
 // Resumen de las reservas del finde en curso: día, hora, líneas y cliente
 export function buildPizzaOrdersSummary(): string {
   const weekOf = currentWeekendKey();
-  const orders = readAllOrders().filter(o => o.weekOf === weekOf);
+  const orders = readAllOrders().filter(o => o.weekOf === weekOf && !o.cancelled);
 
   if (orders.length === 0) {
     return `🍕 Pedidos de pizza — finde del ${weekOf}\n\nNo hay reservas todavía.`;
@@ -251,4 +270,57 @@ export function buildPizzaOrdersSummary(): string {
   if (restante !== null) text += `\nStock restante: ${restante}`;
 
   return text;
+}
+
+// ── Cancelación de reservas ───────────────────────────────────────────────────
+
+// Reservas activas (no canceladas) del finde en curso.
+export function getActiveOrdersForWeek(): PizzaOrderEntry[] {
+  const weekOf = currentWeekendKey();
+  return readAllOrders().filter(o => o.weekOf === weekOf && !o.cancelled);
+}
+
+// Reservas activas del finde en curso hechas por un usuario concreto.
+export function getActiveOrdersByTelegramId(telegramId: string): PizzaOrderEntry[] {
+  return getActiveOrdersForWeek().filter(o => o.telegramId === telegramId);
+}
+
+export function getOrderByNumber(orderNumber: string): PizzaOrderEntry | null {
+  return readAllOrders().find(o => o.orderNumber === orderNumber) ?? null;
+}
+
+// Devuelve unidades al stock del finde en curso (al cancelar una reserva).
+function restoreStock(units: number): void {
+  const state = loadStock();
+  if (state.weekOf !== currentWeekendKey()) return;
+  state.usadas = Math.max(0, state.usadas - units);
+  saveStock(state);
+}
+
+// Marca una reserva como cancelada (borrado lógico) y devuelve el stock.
+// Devuelve la reserva cancelada, o null si no existe o ya estaba cancelada.
+export function cancelOrder(orderNumber: string, cancelledBy: string): PizzaOrderEntry | null {
+  const raws = readRawLines();
+  let cancelled: PizzaOrderEntry | null = null;
+
+  for (const r of raws) {
+    if (r['orderNumber'] === orderNumber && !r['cancelled']) {
+      r['cancelled'] = true;
+      r['cancelledAt'] = new Date().toISOString();
+      r['cancelledBy'] = cancelledBy;
+      cancelled = normalizeOrder(r);
+      break;
+    }
+  }
+
+  if (!cancelled) return null;
+
+  fs.writeFileSync(ORDERS_LOG_PATH, raws.map(r => JSON.stringify(r)).join('\n') + '\n');
+
+  if (cancelled.weekOf === currentWeekendKey()) {
+    restoreStock(cancelled.cantidadTotal);
+  }
+
+  log('PizzaService', `Reserva ${orderNumber} cancelada por ${cancelledBy}`);
+  return cancelled;
 }

@@ -139,6 +139,7 @@ async function sendWelcomeMenu(ctx: BotContext): Promise<void> {
     'Hola! Soy el bot de Madapan 🥖\n\n¿Qué deseas hacer?',
     Markup.inlineKeyboard([
       [Markup.button.callback('🍕 Reservar pizza de fin de semana', 'start_pizza')],
+      [Markup.button.callback('❌ Cancelar mi reserva de pizza', 'pz_cancel_mine')],
       [Markup.button.callback('🥖 Ya soy cliente de Madapan', 'identify_client')],
     ])
   );
@@ -189,6 +190,7 @@ async function sendAdminMenu(ctx: BotContext): Promise<void> {
       [Markup.button.callback('Editar pedido de un cliente', 'admin_select_client')],
       [Markup.button.callback('Stock de pizzas', 'admin_pizzas_stock')],
       [Markup.button.callback('Pedidos de pizzas', 'admin_pizzas_pedidos')],
+      [Markup.button.callback('Cancelar reserva de pizza', 'admin_cancel_pizza')],
       ...(ctx.session.customer
         ? [[Markup.button.callback(`Seguir con ${ctx.session.customer.name}`, 'view_tomorrow')]]
         : []),
