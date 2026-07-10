@@ -47,6 +47,7 @@ import {
   handlePizzaCancelConfirm,
 } from './pizzaFlow';
 import * as pizzaService from '../services/pizzaService';
+import { sendDailyWaybills } from '../jobs/dailyWaybillsJob';
 
 function isStaff(ctx: { from?: { id: number } }): boolean {
   return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
@@ -135,6 +136,25 @@ export function createBot(): Telegraf<BotContext> {
     await sendResumenYProduccion(ctx);
   });
 
+  // Albaranes del día en PDF, bajo demanda (staff). Admite fecha opcional
+  // YYYY-MM-DD para reimprimir/generar la de otro día; por defecto hoy.
+  // ⚠️ Convierte pedidos en albaranes reales en Holded (documentos permanentes).
+  bot.command('albaranes', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const arg = ctx.message.text.split(' ')[1];
+    const { toZonedTime, format } = await import('date-fns-tz');
+    const dateStr = arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)
+      ? arg
+      : format(toZonedTime(new Date(), config.timezone), 'yyyy-MM-dd', { timeZone: config.timezone });
+    await ctx.reply(`Generando albaranes de ${dateStr}...`);
+    try {
+      await sendDailyWaybills(ctx.telegram, dateStr);
+    } catch (err) {
+      error('TelegramBot', `/albaranes failed: ${(err as Error).message}`);
+      await ctx.reply('Error generando los albaranes. Revisa los logs.');
+    }
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -176,6 +196,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
     { command: 'pizzas_stock', description: 'Fijar stock de pizzas del finde (staff)' },
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
+    { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
   ];
 
   // Comandos públicos → visibles para todos los usuarios (scope por defecto)

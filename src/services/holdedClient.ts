@@ -145,6 +145,7 @@ function mapOrder(raw: any): HoldedOrder {
 
   return {
     id: raw.id,
+    docNumber: raw.docNumber ?? raw.doc_number ?? undefined,
     contactId: raw.contact_id ?? '',
     contactName: raw.contact_name ?? '',
     date: raw.date, // texto "YYYY-MM-DD"
@@ -339,6 +340,50 @@ export async function listAllOrdersForDate(dateStr: string): Promise<HoldedOrder
   } catch (err) {
     error('HoldedClient', `listAllOrdersForDate failed: ${(err as Error).message}`);
     return [];
+  }
+}
+
+// Convierte un pedido de venta (salesorder) en un albarán (waybill).
+// Escribe en Holded: crea un documento nuevo. Devuelve el ID del albarán creado.
+export async function convertOrderToWaybill(orderId: string): Promise<string | null> {
+  if (isDryRun) {
+    log('HoldedClient', `[DRY_RUN] Would convert order ${orderId} to waybill`);
+    return null;
+  }
+  try {
+    const response = await withRetry(() =>
+      getInvoicingClient().post<any>('/documents/convert', {
+        source_type: 'salesorder',
+        source_id: orderId,
+        target_type: 'waybill',
+      })
+    );
+    const waybillId = response.data?.id;
+    if (!waybillId) {
+      error('HoldedClient', `convertOrderToWaybill(${orderId}): respuesta sin id`);
+      return null;
+    }
+    log('HoldedClient', `convertOrderToWaybill(${orderId}): albarán creado ${waybillId}`);
+    return waybillId;
+  } catch (err) {
+    error('HoldedClient', `convertOrderToWaybill(${orderId}) failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+// Descarga el PDF (binario) de un albarán ya creado.
+export async function downloadWaybillPdf(waybillId: string): Promise<Buffer | null> {
+  try {
+    const response = await withRetry(() =>
+      getInvoicingClient().get(`/waybills/${waybillId}/pdf`, {
+        responseType: 'arraybuffer',
+        headers: { Accept: 'application/pdf' },
+      })
+    );
+    return Buffer.from(response.data as ArrayBuffer);
+  } catch (err) {
+    error('HoldedClient', `downloadWaybillPdf(${waybillId}) failed: ${(err as Error).message}`);
+    return null;
   }
 }
 

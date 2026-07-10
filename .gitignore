@@ -4,4 +4,5 @@ logs/
 data/clients.json
 data/weekly-base.json
 data/pizza-stock.json
+data/waybill-map.json
 dist/
