@@ -8,9 +8,9 @@ import { toZonedTime, format } from 'date-fns-tz';
 // Genera el PDF combinado de albaranes del día y lo envía al chat de admin.
 // Reutilizable tanto por el job programado como por el comando manual /albaranes.
 export async function sendDailyWaybills(telegram: Telegram, dateStr: string): Promise<void> {
-  const chatId = config.telegramInternalChatId;
+  const chatId = config.waybillsChatId;
   if (!chatId) {
-    warn('DailyWaybillsJob', 'TELEGRAM_INTERNAL_CHAT_ID no configurado — no se puede enviar');
+    warn('DailyWaybillsJob', 'WAYBILLS_CHAT_ID / TELEGRAM_INTERNAL_CHAT_ID no configurado — no se puede enviar');
     return;
   }
 
