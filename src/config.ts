@@ -26,12 +26,14 @@ export const config = {
   timezone: process.env['TIMEZONE'] ?? 'Europe/Madrid',
   autoCutoffHour: parseInt(process.env['AUTO_CHANGE_LIMIT_HOUR'] ?? '20', 10),
   dailySummaryHour: parseInt(process.env['DAILY_SUMMARY_HOUR'] ?? '0', 10),
+  waybillsJobHour: parseInt(process.env['WAYBILLS_JOB_HOUR'] ?? '6', 10),
   nodeEnv: process.env['NODE_ENV'] ?? 'development',
   dryRun: process.env['DRY_RUN'] === 'true',
   clientsCachePath: process.env['CLIENTS_CACHE_PATH'] ?? persistPath('clients.json', 'data/clients.json'),
   logPath: process.env['LOG_PATH'] ?? persistPath('changes.log', 'logs/changes.log'),
   pizzaOrdersLogPath: process.env['PIZZA_ORDERS_LOG_PATH'] ?? persistPath('pizza-orders.log', 'logs/pizza-orders.log'),
   pizzaStockPath: process.env['PIZZA_STOCK_PATH'] ?? persistPath('pizza-stock.json', 'data/pizza-stock.json'),
+  waybillMapPath: process.env['WAYBILL_MAP_PATH'] ?? persistPath('waybill-map.json', 'data/waybill-map.json'),
 };
 
 export const isDryRun = config.dryRun;

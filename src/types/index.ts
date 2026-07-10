@@ -33,6 +33,7 @@ export interface HoldedLine {
 
 export interface HoldedOrder {
   id: string;
+  docNumber?: string;
   contactId: string;
   contactName: string;
   date: string; // "YYYY-MM-DD"
