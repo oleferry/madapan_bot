@@ -13,6 +13,9 @@ const persistPath = (fileName: string, legacy: string): string =>
 export const config = {
   telegramBotToken: process.env['TELEGRAM_BOT_TOKEN'] ?? '',
   telegramInternalChatId: process.env['TELEGRAM_INTERNAL_CHAT_ID'] ?? '',
+  // Chat de destino de los albaranes diarios. Si no se define, cae en el chat
+  // interno general (telegramInternalChatId).
+  waybillsChatId: process.env['WAYBILLS_CHAT_ID'] ?? process.env['TELEGRAM_INTERNAL_CHAT_ID'] ?? '',
   telegramAlertChatIds: (process.env['TELEGRAM_ALERT_CHAT_IDS'] ?? '')
     .split(',').map(s => s.trim()).filter(Boolean),
   adminTelegramIds: (process.env['ADMIN_TELEGRAM_IDS'] ?? '')
