@@ -18,6 +18,17 @@ export async function sendToAdmin(text: string): Promise<void> {
   await sendMessage(chatId, text);
 }
 
+// Notificaciones a todo el staff (p.ej. nueva reserva de pizza) → a cada
+// teléfono marcado como admin en ADMIN_TELEGRAM_IDS.
+export async function sendToAllStaff(text: string): Promise<void> {
+  const targets = config.adminTelegramIds;
+  if (targets.length === 0) {
+    warn('Notifier', 'ADMIN_TELEGRAM_IDS no configurado — mensaje no enviado a staff');
+    return;
+  }
+  await Promise.all(targets.map(id => sendMessage(id, text)));
+}
+
 // Alertas urgentes → al chat principal + todos los IDs de TELEGRAM_ALERT_CHAT_IDS
 export async function sendAlert(text: string): Promise<void> {
   const targets = new Set<string>();

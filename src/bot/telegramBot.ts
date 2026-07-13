@@ -36,9 +36,11 @@ import {
   handlePizzaPostreElegido,
   handlePizzaCantidadElegida,
   handlePizzaDiaElegido,
+  handlePizzaCalendarNav,
   handlePizzaHoraElegida,
   handlePizzaText,
   handlePizzaMarketing,
+  handlePizzaSkipEmail,
   handlePizzaMas,
   handlePizzaSeguir,
   handlePizzaCancelMine,
@@ -161,23 +163,64 @@ export function createBot(): Telegraf<BotContext> {
   // Cancelar mi reserva de pizza — pública (cada uno solo ve las suyas)
   bot.command('cancelar_pizza', handlePizzaCancelMine);
 
-  // Admin: fija el stock de pizzas disponibles para el finde en curso
+  // Admin: fija el stock de pizzas para un finde concreto (por defecto, el próximo)
   bot.command('pizzas_stock', async (ctx) => {
     if (!isStaff(ctx)) return;
-    const arg = ctx.message.text.split(' ')[1];
-    const n = parseInt(arg ?? '', 10);
+    const parts = ctx.message.text.trim().split(/\s+/);
+    const n = parseInt(parts[1] ?? '', 10);
     if (isNaN(n) || n < 0) {
-      await ctx.reply('Uso: /pizzas_stock <número de unidades>\nEjemplo: /pizzas_stock 40');
+      await ctx.reply(
+        'Uso: /pizzas_stock <número de unidades> [fecha YYYY-MM-DD]\n' +
+        'Ejemplo: /pizzas_stock 40\n' +
+        'Con fecha (cualquier finde futuro): /pizzas_stock 40 2026-08-01'
+      );
       return;
     }
-    pizzaService.setWeekendStock(n);
-    await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para este fin de semana.`);
+    let weekOf: string | undefined;
+    if (parts[2]) {
+      try {
+        weekOf = pizzaService.weekendKeyForPickedDate(parts[2]);
+      } catch (err) {
+        await ctx.reply(`Fecha inválida: ${(err as Error).message}`);
+        return;
+      }
+    }
+    const finalWeekOf = pizzaService.setWeekendStock(n, weekOf);
+    await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para el finde del ${pizzaService.formatPizzaDate(finalWeekOf)}.`);
   });
 
   // Admin: resumen de reservas de pizza del finde en curso
   bot.command('pedidos_pizzas', async (ctx) => {
     if (!isStaff(ctx)) return;
     await ctx.reply(pizzaService.buildPizzaOrdersSummary());
+  });
+
+  // Admin: abrir un día puntual para reserva pública de pizza (p.ej. un martes especial)
+  bot.command('pizzas_dia_extra', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const fecha = ctx.message.text.trim().split(/\s+/)[1];
+    if (!fecha) {
+      await ctx.reply('Uso: /pizzas_dia_extra <fecha YYYY-MM-DD>\nEjemplo: /pizzas_dia_extra 2026-07-14');
+      return;
+    }
+    try {
+      pizzaService.addExtraPizzaDate(fecha);
+      await ctx.reply(`✅ ${pizzaService.formatPizzaDate(fecha)} añadido como día puntual reservable.`);
+    } catch (err) {
+      await ctx.reply(`Fecha inválida: ${(err as Error).message}`);
+    }
+  });
+
+  // Admin: quitar un día puntual
+  bot.command('pizzas_dia_extra_quitar', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const fecha = ctx.message.text.trim().split(/\s+/)[1];
+    if (!fecha) {
+      await ctx.reply('Uso: /pizzas_dia_extra_quitar <fecha YYYY-MM-DD>');
+      return;
+    }
+    const quitado = pizzaService.removeExtraPizzaDate(fecha);
+    await ctx.reply(quitado ? `✅ ${pizzaService.formatPizzaDate(fecha)} eliminado de los días puntuales.` : 'Esa fecha no estaba en la lista de días puntuales.');
   });
 
   // Registrar comandos en el menú "/" nativo de Telegram.
@@ -195,6 +238,8 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'produccion', description: 'Producción del día (staff)' },
     { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
     { command: 'pizzas_stock', description: 'Fijar stock de pizzas del finde (staff)' },
+    { command: 'pizzas_dia_extra', description: 'Abrir un día puntual de pizza (staff)' },
+    { command: 'pizzas_dia_extra_quitar', description: 'Quitar un día puntual de pizza (staff)' },
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
     { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
   ];
@@ -470,8 +515,19 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
-      // pz_dia|Día
-      if (data.startsWith('pz_dia|')) {
+      // pz_noop — celda no interactiva del calendario (relleno/cabecera)
+      if (data === 'pz_noop') {
+        return;
+      }
+
+      // pz_cal|YYYY-MM — navegar de mes en el calendario
+      if (data.startsWith('pz_cal|')) {
+        await handlePizzaCalendarNav(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // pz_calday|YYYY-MM-DD — fecha exacta elegida en el calendario
+      if (data.startsWith('pz_calday|')) {
         await handlePizzaDiaElegido(ctx, data.split('|')[1]!);
         return;
       }
@@ -485,6 +541,12 @@ export function createBot(): Telegraf<BotContext> {
       // pz_promo|si|no — consentimiento de marketing (protección de datos)
       if (data.startsWith('pz_promo|')) {
         await handlePizzaMarketing(ctx, data.split('|')[1] === 'si');
+        return;
+      }
+
+      // pz_skip_email — saltar el paso de email (opcional)
+      if (data === 'pz_skip_email') {
+        await handlePizzaSkipEmail(ctx);
         return;
       }
 

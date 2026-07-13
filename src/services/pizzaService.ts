@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { log, warn } from '../utils/logger';
 import { config } from '../config';
+import { getTodayDate, formatDateSpanish } from '../utils/dates';
 
 // ── Menu (estático, tracked en git) ──────────────────────────────────────────
 
@@ -44,38 +45,45 @@ export function getPostreById(id: string): PostreItem | null {
   return getMenu().postres.find(p => p.id === id) ?? null;
 }
 
-// ── Stock semanal (local, no tracked — se resetea cada semana) ──────────────
+// ── Stock por fin de semana (local, no tracked) ──────────────────────────────
+// Ahora que se puede reservar con varias semanas de antelación, el stock se
+// guarda POR finde (clave = viernes de ese finde, "YYYY-MM-DD"), no como un
+// único estado global.
 
-interface PizzaStockState {
-  weekOf: string; // fecha del viernes de la semana en curso, "YYYY-MM-DD"
-  totalDisponible: number; // unidades de "base" preparadas para el finde
+interface WeekendStock {
+  totalDisponible: number;
   usadas: number;
 }
 
+type PizzaStockMap = Record<string, WeekendStock>;
+
 const STOCK_PATH = path.resolve(config.pizzaStockPath);
 
-function loadStock(): PizzaStockState {
+function loadStockMap(): PizzaStockMap {
   try {
-    if (!fs.existsSync(STOCK_PATH)) {
-      return { weekOf: '', totalDisponible: 0, usadas: 0 };
+    if (!fs.existsSync(STOCK_PATH)) return {};
+    const raw = JSON.parse(fs.readFileSync(STOCK_PATH, 'utf-8'));
+    // Compatibilidad: el formato antiguo era un único estado plano
+    // { weekOf, totalDisponible, usadas } en vez de un mapa por finde.
+    if (raw && typeof raw === 'object' && typeof raw.weekOf === 'string' && typeof raw.totalDisponible === 'number') {
+      return { [raw.weekOf]: { totalDisponible: raw.totalDisponible, usadas: raw.usadas ?? 0 } };
     }
-    return JSON.parse(fs.readFileSync(STOCK_PATH, 'utf-8'));
+    return raw && typeof raw === 'object' ? raw : {};
   } catch (err) {
     warn('PizzaService', `Error leyendo stock: ${(err as Error).message}`);
-    return { weekOf: '', totalDisponible: 0, usadas: 0 };
+    return {};
   }
 }
 
-function saveStock(state: PizzaStockState): void {
+function saveStockMap(map: PizzaStockMap): void {
   fs.mkdirSync(path.dirname(STOCK_PATH), { recursive: true });
-  fs.writeFileSync(STOCK_PATH, JSON.stringify(state, null, 2));
+  fs.writeFileSync(STOCK_PATH, JSON.stringify(map, null, 2));
 }
 
-// Devuelve el viernes de la semana en curso (o el próximo si hoy es antes) como "YYYY-MM-DD"
+// Devuelve el viernes de la semana en curso (o el próximo si hoy ya pasó el finde), "YYYY-MM-DD"
 function currentWeekendKey(): string {
   const now = new Date();
   const dow = now.getDay(); // 0=Dom...6=Sáb
-  // Días hasta el viernes más próximo hacia atrás (si ya pasó el finde, key es el viernes que viene)
   let diffToFriday = 5 - dow;
   if (diffToFriday < -1) diffToFriday += 7; // si ya es domingo pasado el viernes, saltar a siguiente semana
   const friday = new Date(now);
@@ -83,30 +91,151 @@ function currentWeekendKey(): string {
   return friday.toISOString().slice(0, 10);
 }
 
-// Admin: fija el total de bases disponibles para el finde en curso
-export function setWeekendStock(total: number): void {
-  const state: PizzaStockState = { weekOf: currentWeekendKey(), totalDisponible: total, usadas: 0 };
-  saveStock(state);
-  log('PizzaService', `Stock de pizzas fijado a ${total} para el finde del ${state.weekOf}`);
+// Dado un "YYYY-MM-DD", devuelve la clave de agrupación de stock/pedidos para
+// esa fecha: si es viernes/sábado/domingo, el viernes de ESE finde (agrupa los
+// 3 días); si es un día suelto (día puntual añadido por el admin, p.ej. un
+// martes especial), se agrupa consigo mismo.
+export function weekendKeyForPickedDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) throw new Error(`Fecha inválida: ${dateStr}`);
+  const date = new Date(y, m - 1, d);
+  const dow = date.getDay();
+  const diffToFriday = dow === 5 ? 0 : dow === 6 ? -1 : dow === 0 ? -2 : null;
+  if (diffToFriday === null) {
+    return dateStr; // día puntual suelto — no pertenece a un finde vie/sáb/dom
+  }
+  date.setDate(date.getDate() + diffToFriday);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
-export function getRemainingStock(): number | null {
-  const state = loadStock();
-  if (state.weekOf !== currentWeekendKey()) return null; // sin stock configurado esta semana
-  return Math.max(0, state.totalDisponible - state.usadas);
+// Admin: fija el total de bases disponibles para un finde concreto (por defecto, el próximo).
+// Conserva las unidades ya vendidas de ese finde si ya existía stock configurado —
+// fijar el stock no debe borrar las reservas ya hechas.
+export function setWeekendStock(total: number, weekOf: string = currentWeekendKey()): string {
+  const map = loadStockMap();
+  const usadasPrevias = map[weekOf]?.usadas ?? 0;
+  map[weekOf] = { totalDisponible: total, usadas: usadasPrevias };
+  saveStockMap(map);
+  log('PizzaService', `Stock de pizzas fijado a ${total} para el finde del ${weekOf} (usadas conservadas: ${usadasPrevias})`);
+  return weekOf;
 }
 
-// Descuenta unidades del stock; devuelve false si no hay suficiente
-export function consumeStock(units: number): boolean {
-  const state = loadStock();
-  if (state.weekOf !== currentWeekendKey()) return true; // sin control de stock configurado — se permite
+export function getRemainingStock(weekOf: string = currentWeekendKey()): number | null {
+  const entry = loadStockMap()[weekOf];
+  if (!entry) return null; // sin stock configurado para ese finde
+  return Math.max(0, entry.totalDisponible - entry.usadas);
+}
 
-  const restante = state.totalDisponible - state.usadas;
+// Descuenta unidades del stock de un finde concreto; devuelve false si no hay suficiente.
+export function consumeStock(weekOf: string, units: number): boolean {
+  const map = loadStockMap();
+  const entry = map[weekOf];
+  if (!entry) return true; // sin control de stock configurado para ese finde — se permite
+
+  const restante = entry.totalDisponible - entry.usadas;
   if (restante < units) return false;
 
-  state.usadas += units;
-  saveStock(state);
+  entry.usadas += units;
+  saveStockMap(map);
   return true;
+}
+
+// Devuelve unidades al stock de un finde concreto (al cancelar una reserva).
+function restoreStock(weekOf: string, units: number): void {
+  const map = loadStockMap();
+  const entry = map[weekOf];
+  if (!entry) return;
+  entry.usadas = Math.max(0, entry.usadas - units);
+  saveStockMap(map);
+}
+
+const DIA_NAME_TO_DOW: Record<string, number> = { 'Domingo': 0, 'Viernes': 5, 'Sábado': 6 };
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// ── Días puntuales (fechas sueltas fuera del patrón semanal vie/sáb/dom) ────
+// El admin puede abrir un día concreto (p.ej. "este martes") para reserva
+// pública, además del patrón fijo de fin de semana.
+
+const EXTRA_DATES_PATH = path.resolve(config.pizzaExtraDatesPath);
+
+function loadExtraDates(): string[] {
+  try {
+    if (!fs.existsSync(EXTRA_DATES_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(EXTRA_DATES_PATH, 'utf-8'));
+    return Array.isArray(raw) ? raw : [];
+  } catch (err) {
+    warn('PizzaService', `Error leyendo días extra: ${(err as Error).message}`);
+    return [];
+  }
+}
+
+function saveExtraDates(dates: string[]): void {
+  fs.mkdirSync(path.dirname(EXTRA_DATES_PATH), { recursive: true });
+  fs.writeFileSync(EXTRA_DATES_PATH, JSON.stringify(dates, null, 2));
+}
+
+// Añade un día puntual reservable. Idempotente.
+export function addExtraPizzaDate(dateStr: string): void {
+  if (!ISO_DATE_RE.test(dateStr)) throw new Error(`Fecha inválida: ${dateStr}`);
+  const dates = loadExtraDates();
+  if (!dates.includes(dateStr)) {
+    dates.push(dateStr);
+    dates.sort();
+    saveExtraDates(dates);
+  }
+  log('PizzaService', `Día puntual de pizza añadido: ${dateStr}`);
+}
+
+// Quita un día puntual. Devuelve false si no existía.
+export function removeExtraPizzaDate(dateStr: string): boolean {
+  const dates = loadExtraDates();
+  const idx = dates.indexOf(dateStr);
+  if (idx === -1) return false;
+  dates.splice(idx, 1);
+  saveExtraDates(dates);
+  log('PizzaService', `Día puntual de pizza eliminado: ${dateStr}`);
+  return true;
+}
+
+// Días puntuales vigentes (no pasados), para mostrar en el listado de admin.
+export function getExtraPizzaDates(): string[] {
+  const today = getTodayDate();
+  return loadExtraDates().filter(d => d >= today);
+}
+
+// Fechas reservables: el patrón fijo (viernes/sábado/domingo) de las próximas
+// `weeksAhead` semanas, más cualquier día puntual añadido por el admin.
+export function getPizzaAvailableDates(weeksAhead = 4): string[] {
+  const diasDisponibles = getMenu().diasDisponibles;
+  const allowedDow = new Set(diasDisponibles.map(d => DIA_NAME_TO_DOW[d]).filter((n): n is number => n !== undefined));
+
+  const today = getTodayDate();
+  const [y, m, d] = today.split('-').map(Number);
+  const start = new Date(y!, m! - 1, d!);
+
+  const dates = new Set<string>();
+  for (let i = 0; i < weeksAhead * 7; i++) {
+    const dt = new Date(start);
+    dt.setDate(start.getDate() + i);
+    if (allowedDow.has(dt.getDay())) {
+      const yyyy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      dates.add(`${yyyy}-${mm}-${dd}`);
+    }
+  }
+  for (const extra of getExtraPizzaDates()) dates.add(extra);
+
+  return [...dates].sort();
+}
+
+// Formatea una fecha de recogida para mostrar; tolera entradas antiguas que
+// guardaban solo el nombre del día ("Viernes") sin fecha real.
+export function formatPizzaDate(dateStr: string): string {
+  return ISO_DATE_RE.test(dateStr) ? formatDateSpanish(dateStr) : dateStr;
 }
 
 // ── Log de pedidos de pizza ───────────────────────────────────────────────────
@@ -143,10 +272,13 @@ export interface PizzaOrderEntry {
 const ORDERS_LOG_PATH = path.resolve(config.pizzaOrdersLogPath);
 
 // Registra el pedido asignándole un número correlativo y devuelve dicho número.
+// El finde (weekOf) se calcula a partir de la fecha real de recogida elegida,
+// no de "ahora" — necesario para poder reservar con semanas de antelación.
 export function logPizzaOrder(entry: Omit<PizzaOrderEntry, 'weekOf' | 'orderNumber'>): string {
   fs.mkdirSync(path.dirname(ORDERS_LOG_PATH), { recursive: true });
   const orderNumber = nextOrderNumber();
-  const full: PizzaOrderEntry = { ...entry, orderNumber, weekOf: currentWeekendKey() };
+  const weekOf = ISO_DATE_RE.test(entry.diaRecogida) ? weekendKeyForPickedDate(entry.diaRecogida) : currentWeekendKey();
+  const full: PizzaOrderEntry = { ...entry, orderNumber, weekOf };
   fs.appendFileSync(ORDERS_LOG_PATH, JSON.stringify(full) + '\n');
   return orderNumber;
 }
@@ -234,8 +366,6 @@ function readAllOrders(): PizzaOrderEntry[] {
   }
 }
 
-const DIA_ORDEN: Record<string, number> = { 'Viernes': 0, 'Sábado': 1, 'Domingo': 2 };
-
 // Etiqueta legible de las líneas de un pedido, p.ej. "2x Menú Margarita, 1x Diavola"
 export function itemsLabel(items: PizzaOrderItem[]): string {
   return items
@@ -243,62 +373,73 @@ export function itemsLabel(items: PizzaOrderItem[]): string {
     .join(', ');
 }
 
-// Resumen de las reservas del finde en curso: día, hora, líneas y cliente
+function isUpcoming(dateStr: string, today: string): boolean {
+  return ISO_DATE_RE.test(dateStr) && dateStr >= today;
+}
+
+// Resumen de TODAS las reservas activas próximas (cualquier finde futuro), agrupadas por finde.
 export function buildPizzaOrdersSummary(): string {
-  const weekOf = currentWeekendKey();
-  const orders = readAllOrders().filter(o => o.weekOf === weekOf && !o.cancelled);
+  const today = getTodayDate();
+  const orders = readAllOrders().filter(o => !o.cancelled && isUpcoming(o.diaRecogida, today));
 
   if (orders.length === 0) {
-    return `🍕 Pedidos de pizza — finde del ${weekOf}\n\nNo hay reservas todavía.`;
+    return `🍕 Pedidos de pizza\n\nNo hay reservas activas próximas.`;
   }
 
   const sorted = [...orders].sort((a, b) => {
-    const diaDiff = (DIA_ORDEN[a.diaRecogida] ?? 9) - (DIA_ORDEN[b.diaRecogida] ?? 9);
+    const diaDiff = a.diaRecogida.localeCompare(b.diaRecogida);
     if (diaDiff !== 0) return diaDiff;
     return a.horaRecogida.localeCompare(b.horaRecogida);
   });
 
-  let totalUnidades = 0;
-  let text = `🍕 Pedidos de pizza — finde del ${weekOf}\n${orders.length} reserva(s)\n\n`;
+  const porFinde = new Map<string, PizzaOrderEntry[]>();
   for (const o of sorted) {
-    totalUnidades += o.cantidadTotal;
-    const ref = o.orderNumber ? `${o.orderNumber} · ` : '';
-    text += `• ${ref}${o.diaRecogida} ${o.horaRecogida} — ${itemsLabel(o.items)} — ${o.nombre} (${o.telefono})\n`;
+    const key = o.weekOf || weekendKeyForPickedDate(o.diaRecogida);
+    if (!porFinde.has(key)) porFinde.set(key, []);
+    porFinde.get(key)!.push(o);
   }
-  text += `\nTotal unidades reservadas: ${totalUnidades}`;
 
-  const restante = getRemainingStock();
-  if (restante !== null) text += `\nStock restante: ${restante}`;
+  let text = `🍕 Pedidos de pizza — próximas reservas\n\n`;
+  let totalGeneral = 0;
+  for (const [weekOf, group] of [...porFinde.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    text += `📅 Finde del ${formatPizzaDate(weekOf)}\n`;
+    let totalFinde = 0;
+    for (const o of group) {
+      totalFinde += o.cantidadTotal;
+      const ref = o.orderNumber ? `${o.orderNumber} · ` : '';
+      text += `• ${ref}${formatPizzaDate(o.diaRecogida)} ${o.horaRecogida} — ${itemsLabel(o.items)} — ${o.nombre} (${o.telefono})\n`;
+    }
+    const restante = getRemainingStock(weekOf);
+    text += `  Subtotal: ${totalFinde} ud(s)`;
+    if (restante !== null) text += ` · Stock restante: ${restante}`;
+    text += `\n\n`;
+    totalGeneral += totalFinde;
+  }
+  text += `Total general: ${totalGeneral} unidad(es)`;
 
-  return text;
+  return text.trim();
 }
 
 // ── Cancelación de reservas ───────────────────────────────────────────────────
 
-// Reservas activas (no canceladas) del finde en curso.
-export function getActiveOrdersForWeek(): PizzaOrderEntry[] {
-  const weekOf = currentWeekendKey();
-  return readAllOrders().filter(o => o.weekOf === weekOf && !o.cancelled);
+// Reservas activas (no canceladas) de cualquier finde futuro.
+export function getActiveUpcomingOrders(): PizzaOrderEntry[] {
+  const today = getTodayDate();
+  return readAllOrders().filter(o => !o.cancelled && isUpcoming(o.diaRecogida, today));
 }
 
-// Reservas activas del finde en curso hechas por un usuario concreto.
+// Reservas activas próximas hechas por un usuario concreto.
 export function getActiveOrdersByTelegramId(telegramId: string): PizzaOrderEntry[] {
-  return getActiveOrdersForWeek().filter(o => o.telegramId === telegramId);
+  return getActiveUpcomingOrders().filter(o => o.telegramId === telegramId);
 }
 
 export function getOrderByNumber(orderNumber: string): PizzaOrderEntry | null {
   return readAllOrders().find(o => o.orderNumber === orderNumber) ?? null;
 }
 
-// Devuelve unidades al stock del finde en curso (al cancelar una reserva).
-function restoreStock(units: number): void {
-  const state = loadStock();
-  if (state.weekOf !== currentWeekendKey()) return;
-  state.usadas = Math.max(0, state.usadas - units);
-  saveStock(state);
-}
-
-// Marca una reserva como cancelada (borrado lógico) y devuelve el stock.
+// Marca una reserva como cancelada (borrado lógico) y devuelve el stock a SU finde
+// (el finde real de la reserva, no el que sea "ahora" — antes solo se devolvía si
+// coincidía con el finde actual, lo cual era incorrecto para reservas futuras).
 // Devuelve la reserva cancelada, o null si no existe o ya estaba cancelada.
 export function cancelOrder(orderNumber: string, cancelledBy: string): PizzaOrderEntry | null {
   const raws = readRawLines();
@@ -318,9 +459,7 @@ export function cancelOrder(orderNumber: string, cancelledBy: string): PizzaOrde
 
   fs.writeFileSync(ORDERS_LOG_PATH, raws.map(r => JSON.stringify(r)).join('\n') + '\n');
 
-  if (cancelled.weekOf === currentWeekendKey()) {
-    restoreStock(cancelled.cantidadTotal);
-  }
+  restoreStock(cancelled.weekOf, cancelled.cantidadTotal);
 
   log('PizzaService', `Reserva ${orderNumber} cancelada por ${cancelledBy}`);
   return cancelled;
