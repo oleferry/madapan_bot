@@ -229,7 +229,11 @@ export async function handleAdminClientChosen(ctx: BotContext, nif: string): Pro
 
 export async function handleAdminPizzaStockPrompt(ctx: BotContext): Promise<void> {
   ctx.session.step = 'admin_awaiting_pizza_stock';
-  await ctx.reply('¿Cuántas unidades de pizza hay disponibles este fin de semana? Escribe el número:');
+  await ctx.reply(
+    '¿Cuántas unidades de pizza hay disponibles?\n\n' +
+    'Escribe solo el número para el próximo finde, o "número fecha" para un finde ' +
+    'concreto (ej: 40 2026-08-01):'
+  );
 }
 
 export async function handleAdminPizzaPedidos(ctx: BotContext): Promise<void> {
@@ -451,17 +455,27 @@ export async function handleText(ctx: BotContext): Promise<void> {
   if (!ctx.message || !('text' in ctx.message)) return;
   const text = (ctx.message as Message.TextMessage).text;
   try {
-    // Admin: fijar stock de pizzas
+    // Admin: fijar stock de pizzas (opcionalmente para un finde concreto)
     if (ctx.session.step === 'admin_awaiting_pizza_stock') {
-      const n = parseInt(text.trim(), 10);
+      const parts = text.trim().split(/\s+/);
+      const n = parseInt(parts[0] ?? '', 10);
       if (isNaN(n) || n < 0) {
-        await ctx.reply('Por favor escribe un número válido (0 o más):');
+        await ctx.reply('Por favor escribe un número válido (0 o más), opcionalmente seguido de una fecha (ej: 40 2026-08-01):');
         return;
       }
+      const { setWeekendStock, weekendKeyForPickedDate, formatPizzaDate } = await import('../services/pizzaService');
+      let weekOf: string | undefined;
+      if (parts[1]) {
+        try {
+          weekOf = weekendKeyForPickedDate(parts[1]);
+        } catch (err) {
+          await ctx.reply(`Fecha inválida: ${(err as Error).message}. Escribe de nuevo (número [fecha]):`);
+          return;
+        }
+      }
       ctx.session.step = 'idle';
-      const { setWeekendStock } = await import('../services/pizzaService');
-      setWeekendStock(n);
-      await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para este fin de semana.`);
+      const finalWeekOf = setWeekendStock(n, weekOf);
+      await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para el finde del ${formatPizzaDate(finalWeekOf)}.`);
       return;
     }
 

@@ -2,7 +2,7 @@ import { Markup } from 'telegraf';
 import { Message } from 'telegraf/types';
 import { BotContext } from './customerFlows';
 import * as pizzaService from '../services/pizzaService';
-import { sendToAdmin } from '../services/notifier';
+import { sendToAdmin, sendToAllStaff } from '../services/notifier';
 import { log, warn } from '../utils/logger';
 import { config } from '../config';
 
@@ -37,14 +37,76 @@ function avisoProteccionDatos(): string {
 
 const HORAS = ['20:00', '20:30', '21:00', '21:30', '22:00', '22:30'];
 
+// ── Calendario real de recogida ──────────────────────────────────────────────
+
+const MESES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+const DOW_HEADERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+// Meses (YYYY-MM) en los que hay al menos una fecha disponible, en orden.
+function monthsPresent(dates: string[]): string[] {
+  return [...new Set(dates.map(d => d.slice(0, 7)))].sort();
+}
+
+// Construye el texto y el teclado del calendario de un mes concreto (YYYY-MM),
+// marcando como pulsables solo las fechas disponibles (viernes/sábado/domingo).
+function buildCalendarMessage(monthKey: string, availableDates: string[]): { text: string; keyboard: ReturnType<typeof Markup.inlineKeyboard> } {
+  const months = monthsPresent(availableDates);
+  const availSet = new Set(availableDates.filter(d => d.startsWith(monthKey)));
+  const [yearStr, monthStr] = monthKey.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr) - 1; // 0-based
+
+  const firstOfMonth = new Date(year, month, 1);
+  const firstDow = (firstOfMonth.getDay() + 6) % 7; // semana empezando en lunes
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const noop = () => Markup.button.callback(' ', 'pz_noop');
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  let row: ReturnType<typeof Markup.button.callback>[] = [];
+  for (let i = 0; i < firstDow; i++) row.push(noop());
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    row.push(
+      availSet.has(dateStr)
+        ? Markup.button.callback(String(day), `pz_calday|${dateStr}`)
+        : noop()
+    );
+    if (row.length === 7) { rows.push(row); row = []; }
+  }
+  if (row.length > 0) {
+    while (row.length < 7) row.push(noop());
+    rows.push(row);
+  }
+
+  const idx = months.indexOf(monthKey);
+  const navRow: ReturnType<typeof Markup.button.callback>[] = [];
+  if (idx > 0) navRow.push(Markup.button.callback('‹', `pz_cal|${months[idx - 1]}`));
+  navRow.push(Markup.button.callback(`${MESES_ES[month]} ${year}`, 'pz_noop'));
+  if (idx >= 0 && idx < months.length - 1) navRow.push(Markup.button.callback('›', `pz_cal|${months[idx + 1]}`));
+
+  const headerRow = DOW_HEADERS.map(d => Markup.button.callback(d, 'pz_noop'));
+
+  const keyboard = Markup.inlineKeyboard([
+    navRow,
+    headerRow,
+    ...rows,
+    [Markup.button.callback('Cancelar', 'main_menu')],
+  ]);
+
+  return { text: '📅 ¿Qué día quieres recogerlo? (solo viernes, sábado y domingo)', keyboard };
+}
+
 // ── Entrada ───────────────────────────────────────────────────────────────────
 
 export async function handlePizzaStart(ctx: BotContext): Promise<void> {
   const menu = pizzaService.getMenu();
-  const restante = pizzaService.getRemainingStock();
 
-  if (restante !== null && restante <= 0) {
-    await ctx.reply('😔 Lo sentimos, no quedan pizzas disponibles para este fin de semana. ¡Prueba la semana que viene!');
+  if (pizzaService.getPizzaAvailableDates(4).length === 0) {
+    await ctx.reply('😔 Lo sentimos, no hay fechas disponibles para reservar en este momento. ¡Vuelve a intentarlo más adelante!');
     return;
   }
 
@@ -58,7 +120,6 @@ export async function handlePizzaStart(ctx: BotContext): Promise<void> {
   }
   text += `Precio individual: ${menu.precioIndividual} €\n`;
   text += `Menú Pizza Madapan: ${menu.precioMenu} € (${menu.menuIncluye})\n\n`;
-  if (restante !== null) text += `Quedan ${restante} unidades disponibles este fin de semana.\n\n`;
   text += `¿Qué quieres pedir?`;
 
   await ctx.reply(text, {
@@ -196,30 +257,47 @@ export async function handlePizzaMas(ctx: BotContext): Promise<void> {
   await pedirTipo(ctx);
 }
 
-// "Continuar con la recogida" → pide el día
+// "Continuar con la recogida" → abre el calendario real (viernes/sábado/domingo, próximas 4 semanas)
 export async function handlePizzaSeguir(ctx: BotContext): Promise<void> {
   const order = ctx.session.pizzaOrder;
   if (!order || order.items.length === 0) {
     await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
     return;
   }
-  const menu = pizzaService.getMenu();
-  const buttons = menu.diasDisponibles.map(d => [Markup.button.callback(d, `pz_dia|${d}`)]);
-  await ctx.reply('¿Qué día quieres recogerlo?', Markup.inlineKeyboard(buttons));
+  const availableDates = pizzaService.getPizzaAvailableDates(4);
+  if (availableDates.length === 0) {
+    await ctx.reply('No hay fechas disponibles para recoger en este momento. Contacta con Madapan: 722 833 052.');
+    return;
+  }
+  const months = monthsPresent(availableDates);
+  const { text, keyboard } = buildCalendarMessage(months[0]!, availableDates);
+  await ctx.reply(text, keyboard);
 }
 
-export async function handlePizzaDiaElegido(ctx: BotContext, dia: string): Promise<void> {
+// Navegar entre meses del calendario (edita el mensaje existente).
+export async function handlePizzaCalendarNav(ctx: BotContext, monthKey: string): Promise<void> {
+  const availableDates = pizzaService.getPizzaAvailableDates(4);
+  const { text, keyboard } = buildCalendarMessage(monthKey, availableDates);
+  try {
+    await ctx.editMessageText(text, keyboard);
+  } catch (err) {
+    warn('PizzaFlow', `Error navegando calendario: ${(err as Error).message}`);
+  }
+}
+
+// Fecha exacta elegida en el calendario (YYYY-MM-DD)
+export async function handlePizzaDiaElegido(ctx: BotContext, dateStr: string): Promise<void> {
   if (!ctx.session.pizzaOrder) {
     await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
     return;
   }
-  ctx.session.pizzaOrder.diaRecogida = dia;
+  ctx.session.pizzaOrder.diaRecogida = dateStr;
 
   const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
   for (let i = 0; i < HORAS.length; i += 3) {
     buttons.push(HORAS.slice(i, i + 3).map(h => Markup.button.callback(h, `pz_hora|${h}`)));
   }
-  await ctx.reply('¿A qué hora la recoges?', Markup.inlineKeyboard(buttons));
+  await ctx.reply(`Recogida: ${pizzaService.formatPizzaDate(dateStr)}\n\n¿A qué hora la recoges?`, Markup.inlineKeyboard(buttons));
 }
 
 export async function handlePizzaHoraElegida(ctx: BotContext, hora: string): Promise<void> {
@@ -304,9 +382,10 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   const cantidadTotal = order.items.reduce((s, i) => s + i.cantidad, 0);
   const precioTotal = order.items.reduce((s, i) => s + i.precioUnidad * i.cantidad, 0);
 
-  const ok = pizzaService.consumeStock(cantidadTotal);
+  const weekOf = pizzaService.weekendKeyForPickedDate(order.diaRecogida);
+  const ok = pizzaService.consumeStock(weekOf, cantidadTotal);
   if (!ok) {
-    await ctx.reply('😔 Lo sentimos, no queda stock suficiente para esa cantidad. Prueba con menos unidades o contacta con Madapan: 722 833 052.');
+    await ctx.reply('😔 Lo sentimos, no queda stock suficiente para esa fecha. Prueba con menos unidades, otra fecha, o contacta con Madapan: 722 833 052.');
     return;
   }
 
@@ -335,25 +414,26 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
       return l;
     })
     .join('\n');
+  const recogidaTexto = `${pizzaService.formatPizzaDate(order.diaRecogida)} a las ${order.horaRecogida}`;
 
   let resumen = `✅ ¡Reserva confirmada!\n\n`;
   resumen += `Número de pedido: ${orderNumber}\n\n`;
   resumen += `${lineasTexto}\n`;
-  resumen += `Recogida: ${order.diaRecogida} a las ${order.horaRecogida}\n`;
+  resumen += `Recogida: ${recogidaTexto}\n`;
   resumen += `Total: ${precioTotal.toFixed(2)} €\n\n`;
   resumen += `Pago en el local al recoger. ¡Te esperamos! 🍕`;
 
   await ctx.reply(resumen);
 
-  const avisoAdmin =
+  const avisoStaff =
     `🍕 Nueva reserva de pizza — ${orderNumber}\n\n` +
     `👤 ${order.nombre} — ${order.telefono} — ${email}\n` +
     `${lineasTexto}\n` +
-    `Recogida: ${order.diaRecogida} a las ${order.horaRecogida}\n` +
+    `Recogida: ${recogidaTexto}\n` +
     `Total: ${precioTotal.toFixed(2)} €\n` +
     `📧 Marketing: ${order.marketingConsent ? 'SÍ acepta promociones' : 'no'}`;
 
-  sendToAdmin(avisoAdmin).catch(err => warn('PizzaFlow', `Error notificando a admin: ${(err as Error).message}`));
+  sendToAllStaff(avisoStaff).catch(err => warn('PizzaFlow', `Error notificando a staff: ${(err as Error).message}`));
 
   ctx.session.pizzaOrder = undefined;
 }
@@ -369,30 +449,30 @@ function puedeCancelar(ctx: BotContext, o: pizzaService.PizzaOrderEntry): boolea
   return isStaffUser(ctx) || o.telegramId === String(ctx.from?.id ?? '');
 }
 
-// Cliente: lista sus reservas activas del finde para cancelar.
+// Cliente: lista sus reservas activas (cualquier finde futuro) para cancelar.
 export async function handlePizzaCancelMine(ctx: BotContext): Promise<void> {
   const telegramId = String(ctx.from?.id ?? '');
   const orders = pizzaService.getActiveOrdersByTelegramId(telegramId);
   if (orders.length === 0) {
-    await ctx.reply('No tienes reservas de pizza activas este fin de semana.');
+    await ctx.reply('No tienes reservas de pizza activas.');
     return;
   }
   const buttons = orders.map(o => [Markup.button.callback(
-    `${o.orderNumber} · ${o.diaRecogida} ${o.horaRecogida} · ${o.cantidadTotal} ud(s)`,
+    `${o.orderNumber} · ${pizzaService.formatPizzaDate(o.diaRecogida)} ${o.horaRecogida} · ${o.cantidadTotal} ud(s)`,
     `pz_cancel|${o.orderNumber}`,
   )]);
   await ctx.reply('¿Qué reserva quieres cancelar?', Markup.inlineKeyboard(buttons));
 }
 
-// Admin: lista todas las reservas activas del finde para cancelar.
+// Admin: lista todas las reservas activas (cualquier finde futuro) para cancelar.
 export async function handleAdminCancelPizza(ctx: BotContext): Promise<void> {
-  const orders = pizzaService.getActiveOrdersForWeek();
+  const orders = pizzaService.getActiveUpcomingOrders();
   if (orders.length === 0) {
-    await ctx.reply('No hay reservas de pizza activas este fin de semana.');
+    await ctx.reply('No hay reservas de pizza activas.');
     return;
   }
   const buttons = orders.map(o => [Markup.button.callback(
-    `${o.orderNumber} · ${o.nombre} · ${o.diaRecogida} ${o.horaRecogida}`,
+    `${o.orderNumber} · ${o.nombre} · ${pizzaService.formatPizzaDate(o.diaRecogida)} ${o.horaRecogida}`,
     `pz_cancel|${o.orderNumber}`,
   )]);
   await ctx.reply('Selecciona la reserva a cancelar:', Markup.inlineKeyboard(buttons));
@@ -410,7 +490,7 @@ export async function handlePizzaCancelPrompt(ctx: BotContext, orderNumber: stri
     return;
   }
   await ctx.reply(
-    `¿Seguro que quieres cancelar ${o.orderNumber}?\n${pizzaService.itemsLabel(o.items)} — ${o.diaRecogida} ${o.horaRecogida}`,
+    `¿Seguro que quieres cancelar ${o.orderNumber}?\n${pizzaService.itemsLabel(o.items)} — ${pizzaService.formatPizzaDate(o.diaRecogida)} ${o.horaRecogida}`,
     Markup.inlineKeyboard([
       [Markup.button.callback('✅ Sí, cancelar', `pz_cancel_ok|${o.orderNumber}`)],
       [Markup.button.callback('No, volver', 'main_menu')],
@@ -444,7 +524,7 @@ export async function handlePizzaCancelConfirm(ctx: BotContext, orderNumber: str
     `❌ Reserva cancelada — ${orderNumber}\n\n` +
     `👤 ${cancelled.nombre} (${cancelled.telefono})\n` +
     `${pizzaService.itemsLabel(cancelled.items)}\n` +
-    `Recogida: ${cancelled.diaRecogida} ${cancelled.horaRecogida}\n` +
+    `Recogida: ${pizzaService.formatPizzaDate(cancelled.diaRecogida)} ${cancelled.horaRecogida}\n` +
     `Cancelada por: ${staff ? 'administración' : 'el cliente'}`;
   sendToAdmin(aviso).catch(err => warn('PizzaFlow', `Error notificando cancelación: ${(err as Error).message}`));
 }

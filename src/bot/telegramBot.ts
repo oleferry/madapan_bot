@@ -36,6 +36,7 @@ import {
   handlePizzaPostreElegido,
   handlePizzaCantidadElegida,
   handlePizzaDiaElegido,
+  handlePizzaCalendarNav,
   handlePizzaHoraElegida,
   handlePizzaText,
   handlePizzaMarketing,
@@ -161,17 +162,30 @@ export function createBot(): Telegraf<BotContext> {
   // Cancelar mi reserva de pizza — pública (cada uno solo ve las suyas)
   bot.command('cancelar_pizza', handlePizzaCancelMine);
 
-  // Admin: fija el stock de pizzas disponibles para el finde en curso
+  // Admin: fija el stock de pizzas para un finde concreto (por defecto, el próximo)
   bot.command('pizzas_stock', async (ctx) => {
     if (!isStaff(ctx)) return;
-    const arg = ctx.message.text.split(' ')[1];
-    const n = parseInt(arg ?? '', 10);
+    const parts = ctx.message.text.trim().split(/\s+/);
+    const n = parseInt(parts[1] ?? '', 10);
     if (isNaN(n) || n < 0) {
-      await ctx.reply('Uso: /pizzas_stock <número de unidades>\nEjemplo: /pizzas_stock 40');
+      await ctx.reply(
+        'Uso: /pizzas_stock <número de unidades> [fecha YYYY-MM-DD]\n' +
+        'Ejemplo: /pizzas_stock 40\n' +
+        'Con fecha (cualquier finde futuro): /pizzas_stock 40 2026-08-01'
+      );
       return;
     }
-    pizzaService.setWeekendStock(n);
-    await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para este fin de semana.`);
+    let weekOf: string | undefined;
+    if (parts[2]) {
+      try {
+        weekOf = pizzaService.weekendKeyForPickedDate(parts[2]);
+      } catch (err) {
+        await ctx.reply(`Fecha inválida: ${(err as Error).message}`);
+        return;
+      }
+    }
+    const finalWeekOf = pizzaService.setWeekendStock(n, weekOf);
+    await ctx.reply(`✅ Stock de pizzas fijado a ${n} unidades para el finde del ${pizzaService.formatPizzaDate(finalWeekOf)}.`);
   });
 
   // Admin: resumen de reservas de pizza del finde en curso
@@ -470,8 +484,19 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
-      // pz_dia|Día
-      if (data.startsWith('pz_dia|')) {
+      // pz_noop — celda no interactiva del calendario (relleno/cabecera)
+      if (data === 'pz_noop') {
+        return;
+      }
+
+      // pz_cal|YYYY-MM — navegar de mes en el calendario
+      if (data.startsWith('pz_cal|')) {
+        await handlePizzaCalendarNav(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // pz_calday|YYYY-MM-DD — fecha exacta elegida en el calendario
+      if (data.startsWith('pz_calday|')) {
         await handlePizzaDiaElegido(ctx, data.split('|')[1]!);
         return;
       }
