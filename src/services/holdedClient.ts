@@ -346,12 +346,11 @@ export async function listAllOrdersForDate(dateStr: string): Promise<HoldedOrder
 // Convierte un pedido de venta (salesorder) en un albarán (waybill).
 // Escribe en Holded: crea un documento nuevo. Devuelve el ID del albarán creado.
 //
-// El endpoint /documents/convert de Holded crea el albarán pero NO copia
-// precio/descuento de las líneas y lo deja en borrador sin numerar. Por eso,
-// justo después de convertir, forzamos las líneas (con precio/descuento/IVA
-// del pedido original, vía API v1) y confirmamos el documento para que
-// Holded le asigne numeración real — igual que se hace al editar pedidos.
-export async function convertOrderToWaybill(orderId: string, order: HoldedOrder): Promise<string | null> {
+// Por defecto el endpoint /documents/convert crea el documento en borrador
+// (sin numeración, y el PDF de un borrador no muestra precio/descuento).
+// Al convertir manualmente desde la web, Holded NO lo deja en borrador — por
+// eso pasamos draft:false explícitamente para replicar ese comportamiento.
+export async function convertOrderToWaybill(orderId: string): Promise<string | null> {
   if (isDryRun) {
     log('HoldedClient', `[DRY_RUN] Would convert order ${orderId} to waybill`);
     return null;
@@ -362,6 +361,7 @@ export async function convertOrderToWaybill(orderId: string, order: HoldedOrder)
         source_type: 'salesorder',
         source_id: orderId,
         target_type: 'waybill',
+        draft: false,
       })
     );
     const waybillId = response.data?.id;
@@ -370,47 +370,10 @@ export async function convertOrderToWaybill(orderId: string, order: HoldedOrder)
       return null;
     }
     log('HoldedClient', `convertOrderToWaybill(${orderId}): albarán creado ${waybillId}`);
-
-    await forzarDatosAlbaran(waybillId, order);
-
     return waybillId;
   } catch (err) {
     error('HoldedClient', `convertOrderToWaybill(${orderId}) failed: ${(err as Error).message}`);
     return null;
-  }
-}
-
-// Reescribe las líneas del albarán con precio/descuento/IVA del pedido
-// original y confirma el documento (status) para que obtenga numeración real.
-// No lanza si falla: el albarán ya existe y se puede reintentar o revisar a mano.
-async function forzarDatosAlbaran(waybillId: string, order: HoldedOrder): Promise<void> {
-  const items = order.lines.map((line: HoldedLine) => ({
-    productId: line.productId,
-    variantId: line.variantId,
-    units: line.units,
-    price: line.price,
-    discount: line.discount,
-    taxes: line.taxes,
-    name: line.name,
-    sku: line.sku,
-  }));
-
-  try {
-    await withRetry(() =>
-      getInvoicingV1Client().put(`/documents/waybill/${waybillId}`, { items })
-    );
-    log('HoldedClient', `forzarDatosAlbaran(${waybillId}): líneas con precio/descuento aplicadas`);
-  } catch (err) {
-    warn('HoldedClient', `forzarDatosAlbaran(${waybillId}) — no se pudieron forzar las líneas: ${(err as Error).message}`);
-  }
-
-  try {
-    await withRetry(() =>
-      getInvoicingV1Client().put(`/documents/waybill/${waybillId}`, { status: 1 })
-    );
-    log('HoldedClient', `forzarDatosAlbaran(${waybillId}): documento confirmado (numeración real)`);
-  } catch (err) {
-    warn('HoldedClient', `forzarDatosAlbaran(${waybillId}) — no se pudo confirmar/numerar: ${(err as Error).message}`);
   }
 }
 
