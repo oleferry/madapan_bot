@@ -4,6 +4,7 @@ import { PDFDocument } from 'pdf-lib';
 import { config } from '../config';
 import { log, warn } from '../utils/logger';
 import * as holdedClient from './holdedClient';
+import { HoldedOrder } from '../types';
 
 // ── Mapa persistente pedido → albarán ────────────────────────────────────────
 // Evita convertir el mismo pedido dos veces (cada conversión crea un documento
@@ -28,14 +29,14 @@ function saveMap(map: Record<string, string>): void {
 }
 
 // Devuelve el ID del albarán de un pedido, convirtiéndolo si aún no existe.
-async function ensureWaybillId(orderId: string): Promise<string | null> {
+async function ensureWaybillId(order: HoldedOrder): Promise<string | null> {
   const map = loadMap();
-  if (map[orderId]) return map[orderId];
+  if (map[order.id]) return map[order.id];
 
-  const waybillId = await holdedClient.convertOrderToWaybill(orderId);
+  const waybillId = await holdedClient.convertOrderToWaybill(order.id, order);
   if (!waybillId) return null;
 
-  map[orderId] = waybillId;
+  map[order.id] = waybillId;
   saveMap(map);
   return waybillId;
 }
@@ -62,7 +63,7 @@ export async function buildDailyWaybillsPdf(dateStr: string): Promise<DailyWaybi
   for (const order of orders) {
     const ref = order.docNumber ?? order.contactName ?? order.id;
     try {
-      const waybillId = await ensureWaybillId(order.id);
+      const waybillId = await ensureWaybillId(order);
       if (!waybillId) {
         failed.push({ ref, reason: 'No se pudo convertir a albarán' });
         continue;
