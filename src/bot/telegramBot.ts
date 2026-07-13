@@ -40,6 +40,7 @@ import {
   handlePizzaHoraElegida,
   handlePizzaText,
   handlePizzaMarketing,
+  handlePizzaSkipEmail,
   handlePizzaMas,
   handlePizzaSeguir,
   handlePizzaCancelMine,
@@ -540,6 +541,12 @@ export function createBot(): Telegraf<BotContext> {
       // pz_promo|si|no — consentimiento de marketing (protección de datos)
       if (data.startsWith('pz_promo|')) {
         await handlePizzaMarketing(ctx, data.split('|')[1] === 'si');
+        return;
+      }
+
+      // pz_skip_email — saltar el paso de email (opcional)
+      if (data === 'pz_skip_email') {
+        await handlePizzaSkipEmail(ctx);
         return;
       }
 

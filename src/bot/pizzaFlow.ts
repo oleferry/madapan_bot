@@ -26,7 +26,7 @@ export interface PizzaSessionData {
 // Aviso de protección de datos mostrado antes de recoger datos personales.
 function avisoProteccionDatos(): string {
   let t = 'ℹ️ Protección de datos\n\n' +
-    'Para gestionar tu reserva, Madapan SL tratará tus datos (nombre, teléfono y email). ';
+    'Para gestionar tu reserva, Madapan SL tratará tus datos (nombre, teléfono y, si lo facilitas, tu email). ';
   if (config.privacyPolicyUrl) {
     t += `Puedes consultar cómo los usamos y ejercer tus derechos aquí:\n${config.privacyPolicyUrl}`;
   } else {
@@ -334,31 +334,56 @@ export async function handlePizzaText(ctx: BotContext): Promise<boolean> {
     if (!order) return true;
     order.telefono = text;
     ctx.session.step = 'pizza_awaiting_email';
-    await ctx.reply('¿Tu email?');
+    await ctx.reply(
+      '¿Tu email? (opcional — puedes escribirlo o saltar este paso)',
+      Markup.inlineKeyboard([[Markup.button.callback('➡️ Saltar (sin email)', 'pz_skip_email')]])
+    );
     return true;
   }
 
   if (ctx.session.step === 'pizza_awaiting_email') {
     if (!order) return true;
-    order.email = text;
-    ctx.session.step = 'pizza_awaiting_marketing';
-    await ctx.reply(
-      '¿Quieres recibir promociones y novedades de Madapan por email? Es opcional; podrás darte de baja cuando quieras.',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('✅ Sí, quiero recibir promociones', 'pz_promo|si')],
-        [Markup.button.callback('No, gracias', 'pz_promo|no')],
-      ])
-    );
+    await procesarEmail(ctx, order, text);
     return true;
   }
 
   return false;
 }
 
+// Botón "Saltar" del paso de email — la reserva sigue sin email.
+export async function handlePizzaSkipEmail(ctx: BotContext): Promise<void> {
+  const order = ctx.session.pizzaOrder;
+  if (!order) {
+    await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
+    return;
+  }
+  await procesarEmail(ctx, order, '');
+}
+
+// Guarda el email (puede ser cadena vacía si se salta) y decide el siguiente
+// paso: preguntar consentimiento de marketing solo si hay email; si no, se
+// confirma directamente el pedido.
+async function procesarEmail(ctx: BotContext, order: PizzaSessionData, email: string): Promise<void> {
+  order.email = email;
+  if (!email) {
+    order.marketingConsent = false;
+    await confirmarPedido(ctx, '');
+    return;
+  }
+  ctx.session.step = 'pizza_awaiting_marketing';
+  await ctx.reply(
+    '¿Quieres recibir promociones y novedades de Madapan por email? Es opcional; podrás darte de baja cuando quieras.',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('✅ Sí, quiero recibir promociones', 'pz_promo|si')],
+      [Markup.button.callback('No, gracias', 'pz_promo|no')],
+    ])
+  );
+}
+
 // Registra la respuesta al consentimiento de marketing y finaliza el pedido.
 export async function handlePizzaMarketing(ctx: BotContext, consent: boolean): Promise<void> {
   const order = ctx.session.pizzaOrder;
-  if (!order || !order.email) {
+  if (!order) {
     ctx.session.step = 'idle';
     await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
     return;
@@ -367,7 +392,7 @@ export async function handlePizzaMarketing(ctx: BotContext, consent: boolean): P
   await ctx.reply(consent
     ? '¡Gracias! Te mantendremos al día de nuestras novedades. 🙌'
     : 'Perfecto, solo usaremos tus datos para gestionar esta reserva.');
-  await confirmarPedido(ctx, order.email);
+  await confirmarPedido(ctx, order.email ?? '');
 }
 
 async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
@@ -427,7 +452,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
 
   const avisoStaff =
     `🍕 Nueva reserva de pizza — ${orderNumber}\n\n` +
-    `👤 ${order.nombre} — ${order.telefono} — ${email}\n` +
+    `👤 ${order.nombre} — ${order.telefono}${email ? ' — ' + email : ' — (sin email)'}\n` +
     `${lineasTexto}\n` +
     `Recogida: ${recogidaTexto}\n` +
     `Total: ${precioTotal.toFixed(2)} €\n` +
