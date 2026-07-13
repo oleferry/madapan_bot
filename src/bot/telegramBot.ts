@@ -194,6 +194,34 @@ export function createBot(): Telegraf<BotContext> {
     await ctx.reply(pizzaService.buildPizzaOrdersSummary());
   });
 
+  // Admin: abrir un día puntual para reserva pública de pizza (p.ej. un martes especial)
+  bot.command('pizzas_dia_extra', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const fecha = ctx.message.text.trim().split(/\s+/)[1];
+    if (!fecha) {
+      await ctx.reply('Uso: /pizzas_dia_extra <fecha YYYY-MM-DD>\nEjemplo: /pizzas_dia_extra 2026-07-14');
+      return;
+    }
+    try {
+      pizzaService.addExtraPizzaDate(fecha);
+      await ctx.reply(`✅ ${pizzaService.formatPizzaDate(fecha)} añadido como día puntual reservable.`);
+    } catch (err) {
+      await ctx.reply(`Fecha inválida: ${(err as Error).message}`);
+    }
+  });
+
+  // Admin: quitar un día puntual
+  bot.command('pizzas_dia_extra_quitar', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const fecha = ctx.message.text.trim().split(/\s+/)[1];
+    if (!fecha) {
+      await ctx.reply('Uso: /pizzas_dia_extra_quitar <fecha YYYY-MM-DD>');
+      return;
+    }
+    const quitado = pizzaService.removeExtraPizzaDate(fecha);
+    await ctx.reply(quitado ? `✅ ${pizzaService.formatPizzaDate(fecha)} eliminado de los días puntuales.` : 'Esa fecha no estaba en la lista de días puntuales.');
+  });
+
   // Registrar comandos en el menú "/" nativo de Telegram.
   // Los comandos de staff se registran SOLO en el chat de cada admin, usando el
   // scope de Telegram, para que los clientes no los vean en su menú.
@@ -209,6 +237,8 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'produccion', description: 'Producción del día (staff)' },
     { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
     { command: 'pizzas_stock', description: 'Fijar stock de pizzas del finde (staff)' },
+    { command: 'pizzas_dia_extra', description: 'Abrir un día puntual de pizza (staff)' },
+    { command: 'pizzas_dia_extra_quitar', description: 'Quitar un día puntual de pizza (staff)' },
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
     { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
   ];

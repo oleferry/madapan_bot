@@ -91,7 +91,10 @@ function currentWeekendKey(): string {
   return friday.toISOString().slice(0, 10);
 }
 
-// Dado un "YYYY-MM-DD" que es viernes, sábado o domingo, devuelve el viernes de ESE finde.
+// Dado un "YYYY-MM-DD", devuelve la clave de agrupación de stock/pedidos para
+// esa fecha: si es viernes/sábado/domingo, el viernes de ESE finde (agrupa los
+// 3 días); si es un día suelto (día puntual añadido por el admin, p.ej. un
+// martes especial), se agrupa consigo mismo.
 export function weekendKeyForPickedDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   if (!y || !m || !d) throw new Error(`Fecha inválida: ${dateStr}`);
@@ -99,7 +102,7 @@ export function weekendKeyForPickedDate(dateStr: string): string {
   const dow = date.getDay();
   const diffToFriday = dow === 5 ? 0 : dow === 6 ? -1 : dow === 0 ? -2 : null;
   if (diffToFriday === null) {
-    throw new Error(`Fecha ${dateStr} no es viernes, sábado o domingo`);
+    return dateStr; // día puntual suelto — no pertenece a un finde vie/sáb/dom
   }
   date.setDate(date.getDate() + diffToFriday);
   const yyyy = date.getFullYear();
@@ -152,7 +155,59 @@ function restoreStock(weekOf: string, units: number): void {
 const DIA_NAME_TO_DOW: Record<string, number> = { 'Domingo': 0, 'Viernes': 5, 'Sábado': 6 };
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// Fechas exactas (viernes/sábado/domingo) reservables en las próximas `weeksAhead` semanas.
+// ── Días puntuales (fechas sueltas fuera del patrón semanal vie/sáb/dom) ────
+// El admin puede abrir un día concreto (p.ej. "este martes") para reserva
+// pública, además del patrón fijo de fin de semana.
+
+const EXTRA_DATES_PATH = path.resolve(config.pizzaExtraDatesPath);
+
+function loadExtraDates(): string[] {
+  try {
+    if (!fs.existsSync(EXTRA_DATES_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(EXTRA_DATES_PATH, 'utf-8'));
+    return Array.isArray(raw) ? raw : [];
+  } catch (err) {
+    warn('PizzaService', `Error leyendo días extra: ${(err as Error).message}`);
+    return [];
+  }
+}
+
+function saveExtraDates(dates: string[]): void {
+  fs.mkdirSync(path.dirname(EXTRA_DATES_PATH), { recursive: true });
+  fs.writeFileSync(EXTRA_DATES_PATH, JSON.stringify(dates, null, 2));
+}
+
+// Añade un día puntual reservable. Idempotente.
+export function addExtraPizzaDate(dateStr: string): void {
+  if (!ISO_DATE_RE.test(dateStr)) throw new Error(`Fecha inválida: ${dateStr}`);
+  const dates = loadExtraDates();
+  if (!dates.includes(dateStr)) {
+    dates.push(dateStr);
+    dates.sort();
+    saveExtraDates(dates);
+  }
+  log('PizzaService', `Día puntual de pizza añadido: ${dateStr}`);
+}
+
+// Quita un día puntual. Devuelve false si no existía.
+export function removeExtraPizzaDate(dateStr: string): boolean {
+  const dates = loadExtraDates();
+  const idx = dates.indexOf(dateStr);
+  if (idx === -1) return false;
+  dates.splice(idx, 1);
+  saveExtraDates(dates);
+  log('PizzaService', `Día puntual de pizza eliminado: ${dateStr}`);
+  return true;
+}
+
+// Días puntuales vigentes (no pasados), para mostrar en el listado de admin.
+export function getExtraPizzaDates(): string[] {
+  const today = getTodayDate();
+  return loadExtraDates().filter(d => d >= today);
+}
+
+// Fechas reservables: el patrón fijo (viernes/sábado/domingo) de las próximas
+// `weeksAhead` semanas, más cualquier día puntual añadido por el admin.
 export function getPizzaAvailableDates(weeksAhead = 4): string[] {
   const diasDisponibles = getMenu().diasDisponibles;
   const allowedDow = new Set(diasDisponibles.map(d => DIA_NAME_TO_DOW[d]).filter((n): n is number => n !== undefined));
@@ -161,7 +216,7 @@ export function getPizzaAvailableDates(weeksAhead = 4): string[] {
   const [y, m, d] = today.split('-').map(Number);
   const start = new Date(y!, m! - 1, d!);
 
-  const dates: string[] = [];
+  const dates = new Set<string>();
   for (let i = 0; i < weeksAhead * 7; i++) {
     const dt = new Date(start);
     dt.setDate(start.getDate() + i);
@@ -169,10 +224,12 @@ export function getPizzaAvailableDates(weeksAhead = 4): string[] {
       const yyyy = dt.getFullYear();
       const mm = String(dt.getMonth() + 1).padStart(2, '0');
       const dd = String(dt.getDate()).padStart(2, '0');
-      dates.push(`${yyyy}-${mm}-${dd}`);
+      dates.add(`${yyyy}-${mm}-${dd}`);
     }
   }
-  return dates;
+  for (const extra of getExtraPizzaDates()) dates.add(extra);
+
+  return [...dates].sort();
 }
 
 // Formatea una fecha de recogida para mostrar; tolera entradas antiguas que
