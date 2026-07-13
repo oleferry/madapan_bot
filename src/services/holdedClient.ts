@@ -346,22 +346,42 @@ export async function listAllOrdersForDate(dateStr: string): Promise<HoldedOrder
 // Convierte un pedido de venta (salesorder) en un albarán (waybill).
 // Escribe en Holded: crea un documento nuevo. Devuelve el ID del albarán creado.
 //
-// Por defecto el endpoint /documents/convert crea el documento en borrador
-// (sin numeración, y el PDF de un borrador no muestra precio/descuento).
-// Al convertir manualmente desde la web, Holded NO lo deja en borrador — por
-// eso pasamos draft:false explícitamente para replicar ese comportamiento.
+// Confirmado con soporte de Holded: /documents/convert (v2) SIEMPRE crea el
+// documento en borrador (sin numeración, PDF sin precio/descuento) y no
+// respeta approveDoc/draft — no hay forma de "aprobar" ese borrador después.
+// La solución es crear el albarán directamente vía API v1 (POST, no PUT)
+// copiando las líneas del pedido, con approveDoc:true. Verificado: el
+// resultado queda con draft:false y numeración real (ej. "A262910").
 export async function convertOrderToWaybill(orderId: string): Promise<string | null> {
   if (isDryRun) {
     log('HoldedClient', `[DRY_RUN] Would convert order ${orderId} to waybill`);
     return null;
   }
+
+  const order = await getOrder(orderId);
+  if (!order) {
+    error('HoldedClient', `convertOrderToWaybill(${orderId}): no se pudo cargar el pedido`);
+    return null;
+  }
+
+  const items = order.lines.map((line: HoldedLine) => ({
+    productId: line.productId,
+    variantId: line.variantId,
+    units: line.units,
+    price: line.price,
+    discount: line.discount,
+    taxes: line.taxes,
+    name: line.name,
+    sku: line.sku,
+  }));
+
   try {
     const response = await withRetry(() =>
-      getInvoicingClient().post<any>('/documents/convert', {
-        source_type: 'salesorder',
-        source_id: orderId,
-        target_type: 'waybill',
-        draft: false,
+      getInvoicingV1Client().post<any>('/documents/waybill', {
+        contactId: order.contactId,
+        date: Math.floor(Date.now() / 1000),
+        items,
+        approveDoc: true,
       })
     );
     const waybillId = response.data?.id;
@@ -369,7 +389,7 @@ export async function convertOrderToWaybill(orderId: string): Promise<string | n
       error('HoldedClient', `convertOrderToWaybill(${orderId}): respuesta sin id`);
       return null;
     }
-    log('HoldedClient', `convertOrderToWaybill(${orderId}): albarán creado ${waybillId}`);
+    log('HoldedClient', `convertOrderToWaybill(${orderId}): albarán creado ${waybillId} (nº ${response.data?.invoiceNum ?? '?'})`);
     return waybillId;
   } catch (err) {
     error('HoldedClient', `convertOrderToWaybill(${orderId}) failed: ${(err as Error).message}`);
