@@ -377,13 +377,27 @@ function isUpcoming(dateStr: string, today: string): boolean {
   return ISO_DATE_RE.test(dateStr) && dateStr >= today;
 }
 
-// Resumen de TODAS las reservas activas próximas (cualquier finde futuro), agrupadas por finde.
-export function buildPizzaOrdersSummary(): string {
+// Suma `days` días a una fecha "YYYY-MM-DD" y devuelve el resultado en el mismo formato.
+function addDaysIso(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y!, m! - 1, d!);
+  date.setDate(date.getDate() + days);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Resumen de las reservas activas en los próximos `diasAdelante` días (por
+// defecto 7), agrupadas por finde. Para ver TODAS las reservas futuras sin
+// límite, usar getActiveUpcomingOrders().
+export function buildPizzaOrdersSummary(diasAdelante = 7): string {
   const today = getTodayDate();
-  const orders = readAllOrders().filter(o => !o.cancelled && isUpcoming(o.diaRecogida, today));
+  const limite = addDaysIso(today, diasAdelante);
+  const orders = readAllOrders().filter(o => !o.cancelled && isUpcoming(o.diaRecogida, today) && o.diaRecogida <= limite);
 
   if (orders.length === 0) {
-    return `🍕 Pedidos de pizza\n\nNo hay reservas activas próximas.`;
+    return `🍕 Pedidos de pizza (próximos ${diasAdelante} días)\n\nNo hay reservas activas en este rango.`;
   }
 
   const sorted = [...orders].sort((a, b) => {
@@ -399,7 +413,7 @@ export function buildPizzaOrdersSummary(): string {
     porFinde.get(key)!.push(o);
   }
 
-  let text = `🍕 Pedidos de pizza — próximas reservas\n\n`;
+  let text = `🍕 Pedidos de pizza — próximos ${diasAdelante} días\n\n`;
   let totalGeneral = 0;
   for (const [weekOf, group] of [...porFinde.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     text += `📅 Finde del ${formatPizzaDate(weekOf)}\n`;
