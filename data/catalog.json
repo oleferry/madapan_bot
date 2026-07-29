@@ -47,6 +47,8 @@
     "12439477L": { "cod": "B24", "name": "Herbolario Medina",          "discount": 20, "tarifa": "Tarifa 2026" },
     "60673257Q": { "cod": "B25", "name": "Kiosko Calle Hípica",        "discount": 20, "tarifa": "Tarifa 2026" },
     "Z3651570A": { "cod": "B26", "name": "Yolexis del Carmen",         "discount": 20, "tarifa": "Tarifa 2025" },
+    "X9701300S": { "cod": "B26", "name": "Metodi Ivanov Borisov",      "discount": 20, "tarifa": "Tarifa 2026" },
+    "Y7996023H": { "cod": "B27", "name": "Mayra Valentina Espinosa",   "discount": 20, "tarifa": "Tarifa 2026" },
     "44915579Y": { "cod": "B00", "name": "Daniel Paniagua (pruebas)",  "discount": 20, "tarifa": "Tarifa 2025" }
   }
 }
