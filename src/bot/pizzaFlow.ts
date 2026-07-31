@@ -35,7 +35,7 @@ function avisoProteccionDatos(): string {
   return t;
 }
 
-const HORAS = ['20:00', '20:30', '21:00', '21:30', '22:00', '22:30'];
+const HORAS = ['21:00', '21:30', '22:00', '22:30'];
 
 // ── Calendario real de recogida ──────────────────────────────────────────────
 
