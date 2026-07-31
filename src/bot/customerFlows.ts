@@ -113,11 +113,17 @@ export async function handleContact(ctx: BotContext): Promise<void> {
 
 // ── Main menu ─────────────────────────────────────────────────────────────────
 
+// Hora de corte tal y como se le muestra al cliente ("22:00"). Se deriva de
+// AUTO_CHANGE_LIMIT_HOUR para que el texto no se desincronice del corte real.
+function cutoffLabel(): string {
+  return `${String(config.autoCutoffHour).padStart(2, '0')}:00`;
+}
+
 async function sendMainMenu(ctx: BotContext, name: string): Promise<void> {
   const { isAfterCutoff } = await import('../utils/dates');
   const afterCutoff = isAfterCutoff();
   const aviso = afterCutoff
-    ? '\n⚠️ Son más de las 20:00 — los cambios grandes pueden requerir confirmación de Madapan.'
+    ? `\n⚠️ Son más de las ${cutoffLabel()} — los cambios grandes pueden requerir confirmación de Madapan.`
     : '';
   await ctx.reply(
     `Hola, ${name}!${aviso}\n\n¿Qué deseas hacer?`,
@@ -517,7 +523,7 @@ export async function handleText(ctx: BotContext): Promise<void> {
         `• Ver tu pedido del día siguiente\n` +
         `• Cambiar cantidades de cualquier producto\n` +
         `• Añadir productos que no estén en el pedido\n\n` +
-        `⚠️ Los cambios se admiten hasta las 20:00 del día anterior a la entrega.\n` +
+        `⚠️ Los cambios se admiten hasta las ${cutoffLabel()} del día anterior a la entrega.\n` +
         `Los panes especiales (centeno, semillas, integral, pasas y nueces) necesitan al menos 24h de antelación.\n\n` +
         `Para cualquier duda: 722 833 052 · hola@madapan.es (9:00–14:00)`
       );
