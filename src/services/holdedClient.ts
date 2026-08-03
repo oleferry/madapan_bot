@@ -3,6 +3,7 @@ import { config, isDryRun } from '../config';
 import { HoldedContact, HoldedOrder, HoldedLine, HoldedUpdateResult } from '../types';
 import { log, warn, error } from '../utils/logger';
 import { unixToDateStr } from '../utils/dates';
+import * as catalogService from './catalogService';
 
 // ── Axios instances ──────────────────────────────────────────────────────────
 
@@ -223,11 +224,30 @@ export function isOrderEditable(order: HoldedOrder): boolean {
   return status !== 'invoiced' && status !== 'cancelled' && status !== 'canceled';
 }
 
+// Holded almacena los precios con 5 decimales pero su API solo devuelve 2
+// ("1,73" en vez de 1,73077). Como al cambiar una cantidad hay que reenviar
+// TODAS las líneas, reenviar ese precio truncado degradaría el pedido de forma
+// permanente. Esta función recupera la precisión desde el catálogo.
+//
+// Es deliberadamente conservadora: solo sustituye el precio si el del catálogo,
+// redondeado a 2 decimales, coincide con el que devolvió Holded. Así nunca
+// cambia un precio real (por ejemplo, uno pactado a mano para una línea
+// concreta), solo restaura los decimales que la API se dejó por el camino.
+function precisePrice(line: HoldedLine, tarifa?: string): number {
+  if (!tarifa) return line.price;
+  const product = catalogService.getProductBySku(line.sku);
+  if (!product) return line.price;
+  const full = catalogService.getTarifaPrice(product, tarifa);
+  if (!full) return line.price;
+  return Math.round(full * 100) / 100 === line.price ? full : line.price;
+}
+
 export async function updateLineUnits(
   orderId: string,
   lineId: string,
   newUnits: number,
-  order: HoldedOrder
+  order: HoldedOrder,
+  tarifa?: string
 ): Promise<HoldedUpdateResult> {
   if (isDryRun) {
     log(
@@ -244,7 +264,7 @@ export async function updateLineUnits(
       productId: line.productId,
       variantId: line.variantId,
       units: line.id === lineId ? newUnits : line.units,
-      price: line.price,
+      price: precisePrice(line, tarifa),
       discount: line.discount,
       taxes: line.taxes,
       name: line.name,
@@ -273,7 +293,8 @@ export async function updateLineUnits(
 export async function removeLineFromOrder(
   orderId: string,
   lineId: string,
-  order: HoldedOrder
+  order: HoldedOrder,
+  tarifa?: string
 ): Promise<{ success: boolean; error?: string }> {
   if (isDryRun) {
     log('HoldedClient', `[DRY_RUN] Would remove line ${lineId} from order ${orderId}`);
@@ -287,7 +308,7 @@ export async function removeLineFromOrder(
         productId: line.productId,
         variantId: line.variantId,
         units: line.units,
-        price: line.price,
+        price: precisePrice(line, tarifa),
         discount: line.discount,
         taxes: line.taxes,
         name: line.name,
@@ -416,7 +437,8 @@ export async function downloadWaybillPdf(waybillId: string): Promise<Buffer | nu
 export async function addLineToOrder(
   orderId: string,
   order: HoldedOrder,
-  newLine: { productId: string; name: string; sku: string; units: number; price: number; discount: number; taxPct: number }
+  newLine: { productId: string; name: string; sku: string; units: number; price: number; discount: number; taxPct: number },
+  tarifa?: string
 ): Promise<{ success: boolean; error?: string }> {
   const taxKey = `s_iva_${newLine.taxPct}`;
 
@@ -430,7 +452,7 @@ export async function addLineToOrder(
       productId: line.productId,
       variantId: line.variantId,
       units: line.units,
-      price: line.price,
+      price: precisePrice(line, tarifa),
       discount: line.discount,
       taxes: line.taxes,
       sku: line.sku,

@@ -89,7 +89,7 @@ export async function addProductToOrder(
     price,
     discount,
     taxPct: product.iva,
-  });
+  }, tarifa);
 
   if (!result.success) {
     return { success: false, message: 'Error al añadir el producto. Inténtalo de nuevo.' };
@@ -177,7 +177,7 @@ export async function changeLineUnits(params: {
   const overThreshold = Math.abs(delta) > threshold;
 
   // Apply the change regardless (warn if over threshold)
-  const result = await holdedClient.updateLineUnits(order.id, lineId, newUnits, order);
+  const result = await holdedClient.updateLineUnits(order.id, lineId, newUnits, order, customer.tarifa);
 
   const entry: ChangeLogEntry = {
     timestamp: new Date().toISOString(),

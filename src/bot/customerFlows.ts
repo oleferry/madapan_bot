@@ -839,7 +839,7 @@ export async function handleCancelLine(ctx: BotContext, lineIdx: number): Promis
     }
 
     const { removeLineFromOrder } = await import('../services/holdedClient');
-    const result = await removeLineFromOrder(orderId, sessionLine.id, order);
+    const result = await removeLineFromOrder(orderId, sessionLine.id, order, customer.tarifa);
 
     if (!result.success) {
       await ctx.reply('Error al eliminar el producto. Inténtalo de nuevo.');
