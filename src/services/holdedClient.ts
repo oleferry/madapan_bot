@@ -418,6 +418,56 @@ export async function convertOrderToWaybill(orderId: string): Promise<string | n
   }
 }
 
+// Crea un pedido de venta con sus líneas. Igual que con los albaranes,
+// approveDoc:true es imprescindible para que quede aprobado y numerado en vez
+// de en borrador (los borradores no muestran precios en el PDF).
+export async function createSalesOrder(
+  contactId: string,
+  fechaIso: string,
+  lines: Array<{ sku: string; name: string; units: number; price: number; discount: number; taxPct: number }>
+): Promise<{ ok: boolean; id?: string; docNumber?: string; error?: string }> {
+  if (isDryRun) {
+    log('HoldedClient', `[DRY_RUN] Crearía pedido para ${contactId} el ${fechaIso} con ${lines.length} líneas`);
+    return { ok: true };
+  }
+
+  const [y, m, d] = fechaIso.split('-').map(Number);
+  const ts = Math.floor(new Date(y!, m! - 1, d!, 12, 0, 0).getTime() / 1000);
+
+  const items = lines.map(l => {
+    const product = catalogService.getProductBySku(l.sku);
+    return {
+      productId: product?.holdedId ?? undefined,
+      name: l.name,
+      sku: l.sku,
+      units: l.units,
+      price: l.price,
+      discount: l.discount,
+      taxes: [`s_iva_${l.taxPct}`],
+    };
+  });
+
+  try {
+    const r = await withRetry(() =>
+      getInvoicingV1Client().post<any>('/documents/salesorder', {
+        contactId,
+        date: ts,
+        items,
+        approveDoc: true,
+      })
+    );
+    const id = r.data?.id;
+    if (!id) return { ok: false, error: `respuesta sin id: ${JSON.stringify(r.data)}` };
+    log('HoldedClient', `Pedido creado ${id} (nº ${r.data?.invoiceNum ?? '?'}) para ${contactId} el ${fechaIso}`);
+    return { ok: true, id, docNumber: r.data?.invoiceNum };
+  } catch (err) {
+    const ax = err as AxiosError;
+    const msg = `${ax.message} ${JSON.stringify(ax.response?.data ?? '')}`.slice(0, 200);
+    error('HoldedClient', `createSalesOrder failed (${contactId}, ${fechaIso}): ${msg}`);
+    return { ok: false, error: msg };
+  }
+}
+
 // Descarga el PDF (binario) de un albarán ya creado.
 export async function downloadWaybillPdf(waybillId: string): Promise<Buffer | null> {
   try {

@@ -50,6 +50,7 @@ import {
 } from './pizzaFlow';
 import * as pizzaService from '../services/pizzaService';
 import { sendDailyWaybills } from '../jobs/dailyWaybillsJob';
+import { prepararCargaSemanal, confirmarCargaSemanal, cancelarCargaSemanal } from '../jobs/weeklyOrdersJob';
 
 function isStaff(ctx: { from?: { id: number } }): boolean {
   return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
@@ -157,6 +158,18 @@ export function createBot(): Telegraf<BotContext> {
     }
   });
 
+  // Carga semanal de pedidos desde la hoja maestra (staff).
+  // Solo prepara y pide confirmación; no crea nada sin que un admin lo apruebe.
+  bot.command('cargar_semana', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    try {
+      await prepararCargaSemanal(ctx.telegram, String(ctx.chat.id));
+    } catch (err) {
+      error('TelegramBot', `/cargar_semana failed: ${(err as Error).message}`);
+      await ctx.reply(`Error preparando la carga: ${(err as Error).message}`);
+    }
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -236,6 +249,7 @@ export function createBot(): Telegraf<BotContext> {
     ...publicCommands,
     { command: 'resumen', description: 'Resumen de cambios de hoy (staff)' },
     { command: 'produccion', description: 'Producción del día (staff)' },
+    { command: 'cargar_semana', description: 'Cargar pedidos de la semana en Holded (staff)' },
     { command: 'resumen_produccion', description: 'Resumen + producción juntos (staff)' },
     { command: 'pizzas_stock', description: 'Fijar stock de pizzas del finde (staff)' },
     { command: 'pizzas_dia_extra', description: 'Abrir un día puntual de pizza (staff)' },
@@ -431,6 +445,18 @@ export function createBot(): Telegraf<BotContext> {
       if (data.startsWith('acli|')) {
         const nif = data.split('|')[1]!;
         await handleAdminClientChosen(ctx, nif);
+        return;
+      }
+
+      // cs_ok / cs_no — confirmar o cancelar la carga semanal (solo staff)
+      if (data === 'cs_ok' || data === 'cs_no') {
+        if (!isStaff(ctx)) return;
+        if (data === 'cs_no') {
+          cancelarCargaSemanal();
+          await ctx.reply('Carga semanal cancelada. No se ha creado nada en Holded.');
+        } else {
+          await confirmarCargaSemanal(ctx.telegram, String(ctx.chat!.id));
+        }
         return;
       }
 

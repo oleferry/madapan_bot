@@ -20,6 +20,15 @@ export const config = {
     .split(',').map(s => s.trim()).filter(Boolean),
   adminTelegramIds: (process.env['ADMIN_TELEGRAM_IDS'] ?? '')
     .split(',').map(s => s.trim()).filter(Boolean),
+  // Google Sheets — hoja maestra de pedidos semanales.
+  // En Railway la credencial va como variable de entorno (el JSON entero en una
+  // línea); en local basta con dejar el fichero y apuntar GOOGLE_KEY_FILE.
+  googleServiceAccountJson: process.env['GOOGLE_SERVICE_ACCOUNT_JSON'] ?? '',
+  googleKeyFile: process.env['GOOGLE_KEY_FILE'] ?? '',
+  masterSheetId: process.env['MASTER_SHEET_ID'] ?? '',
+  // Día y hora de la carga semanal (5 = viernes)
+  weeklyOrdersDow: parseInt(process.env['WEEKLY_ORDERS_DOW'] ?? '5', 10),
+  weeklyOrdersHour: parseInt(process.env['WEEKLY_ORDERS_HOUR'] ?? '10', 10),
   holdedApiKey: process.env['HOLDED_API_KEY'] ?? '',
   holdedApiKeyV1: process.env['HOLDED_API_KEY_V1'] ?? '',
   holdedApiBaseUrl: process.env['HOLDED_API_BASE_URL'] ?? 'https://api.holded.com/api/v2',
