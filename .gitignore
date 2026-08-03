@@ -4,5 +4,12 @@ logs/
 data/clients.json
 data/weekly-base.json
 data/pizza-stock.json
+data/pizza-extra-dates.json
 data/waybill-map.json
 dist/
+
+# Credenciales de cuenta de servicio de Google — NUNCA subir al repo
+*service-account*.json
+*service_account*.json
+madapanbot-*.json
+gcp-credentials.json
