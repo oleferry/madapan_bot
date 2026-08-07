@@ -434,6 +434,12 @@ export async function createSalesOrder(
   const [y, m, d] = fechaIso.split('-').map(Number);
   const ts = Math.floor(new Date(y!, m! - 1, d!, 12, 0, 0).getTime() / 1000);
 
+  // Nota: Holded ignora este "price". Reconoce la línea por el SKU y resuelve
+  // el precio por su cuenta: la tarifa del contacto, o el precio base del
+  // producto si el contacto no tiene tarifa. Comprobado sobre 162 líneas
+  // reales: ninguna conservó un precio libre. Por eso las tarifas tienen que
+  // estar bien asignadas en la ficha de cada contacto de Holded; enviarlas
+  // aquí no sirve de nada.
   const items = lines.map(l => {
     const product = catalogService.getProductBySku(l.sku);
     return {
