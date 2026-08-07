@@ -23,6 +23,7 @@ export const config = {
   // Google Sheets — hoja maestra de pedidos semanales.
   // En Railway la credencial va como variable de entorno (el JSON entero en una
   // línea); en local basta con dejar el fichero y apuntar GOOGLE_KEY_FILE.
+  googleServiceAccountB64: process.env['GOOGLE_SERVICE_ACCOUNT_B64'] ?? '',
   googleServiceAccountJson: process.env['GOOGLE_SERVICE_ACCOUNT_JSON'] ?? '',
   googleKeyFile: process.env['GOOGLE_KEY_FILE'] ?? '',
   masterSheetId: process.env['MASTER_SHEET_ID'] ?? '',
