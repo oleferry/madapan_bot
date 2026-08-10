@@ -41,6 +41,8 @@ import {
   handlePizzaText,
   handlePizzaMarketing,
   handlePizzaSkipEmail,
+  handlePizzaSkipPhone,
+  handlePizzaPhoneBack,
   handlePizzaMas,
   handlePizzaSeguir,
   handlePizzaCancelMine,
@@ -570,9 +572,21 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
-      // pz_skip_email — saltar el paso de email (opcional)
+      // pz_skip_email — saltar el paso de email (solo si hay teléfono)
       if (data === 'pz_skip_email') {
         await handlePizzaSkipEmail(ctx);
+        return;
+      }
+
+      // pz_skip_phone — dar email en lugar de teléfono
+      if (data === 'pz_skip_phone') {
+        await handlePizzaSkipPhone(ctx);
+        return;
+      }
+
+      // pz_skip_phone_back — volver a pedir el teléfono
+      if (data === 'pz_skip_phone_back') {
+        await handlePizzaPhoneBack(ctx);
         return;
       }
 

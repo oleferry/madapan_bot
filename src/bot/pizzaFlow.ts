@@ -313,6 +313,21 @@ export async function handlePizzaHoraElegida(ctx: BotContext, hora: string): Pro
 
 // ── Texto: nombre, teléfono, email ────────────────────────────────────────────
 
+// Necesitamos poder avisar al cliente si hay un problema con su reserva, así
+// que exigimos al menos una vía de contacto: teléfono o email. Sin validar,
+// la gente escribía "no" o "-" en el teléfono y nos quedábamos sin forma de
+// localizarla.
+
+// Teléfono español: 9 dígitos, admitiendo prefijo +34 y separadores.
+function esTelefonoValido(v: string): boolean {
+  const limpio = v.replace(/[\s.\-()]/g, '');
+  return /^(\+34|0034|34)?[6-9]\d{8}$/.test(limpio);
+}
+
+function esEmailValido(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(v.trim());
+}
+
 export async function handlePizzaText(ctx: BotContext): Promise<boolean> {
   if (!ctx.message || !('text' in ctx.message)) return false;
   const text = (ctx.message as Message.TextMessage).text.trim();
@@ -332,7 +347,25 @@ export async function handlePizzaText(ctx: BotContext): Promise<boolean> {
 
   if (ctx.session.step === 'pizza_awaiting_phone') {
     if (!order) return true;
-    order.telefono = text;
+
+    // Si escribe un email aquí, lo damos por bueno: ya tenemos cómo avisarle.
+    if (esEmailValido(text)) {
+      order.telefono = '';
+      await procesarEmail(ctx, order, text.trim());
+      return true;
+    }
+
+    if (!esTelefonoValido(text)) {
+      await ctx.reply(
+        'Ese teléfono no parece válido. Escribe un móvil o fijo de 9 dígitos ' +
+        '(por ejemplo 612345678).\n\n' +
+        'Si prefieres no dar teléfono, puedes dejarnos un email.',
+        Markup.inlineKeyboard([[Markup.button.callback('✉️ Prefiero dar email', 'pz_skip_phone')]])
+      );
+      return true;
+    }
+
+    order.telefono = text.trim();
     ctx.session.step = 'pizza_awaiting_email';
     await ctx.reply(
       '¿Tu email? (opcional — puedes escribirlo o saltar este paso)',
@@ -343,21 +376,68 @@ export async function handlePizzaText(ctx: BotContext): Promise<boolean> {
 
   if (ctx.session.step === 'pizza_awaiting_email') {
     if (!order) return true;
-    await procesarEmail(ctx, order, text);
+
+    if (!esEmailValido(text)) {
+      // Sin teléfono, el email es la única vía de contacto: no vale saltarlo.
+      const sinTelefono = !order.telefono;
+      await ctx.reply(
+        'Ese email no parece válido. Escríbelo con el formato nombre@dominio.com.' +
+        (sinTelefono ? '\n\nComo no nos has dado teléfono, lo necesitamos para confirmarte la reserva.' : ''),
+        sinTelefono
+          ? Markup.inlineKeyboard([[Markup.button.callback('📞 Mejor doy un teléfono', 'pz_skip_phone_back')]])
+          : Markup.inlineKeyboard([[Markup.button.callback('➡️ Saltar (sin email)', 'pz_skip_email')]])
+      );
+      return true;
+    }
+
+    await procesarEmail(ctx, order, text.trim());
     return true;
   }
 
   return false;
 }
 
-// Botón "Saltar" del paso de email — la reserva sigue sin email.
+// Botón "Saltar" del paso de email — solo si ya tenemos teléfono.
 export async function handlePizzaSkipEmail(ctx: BotContext): Promise<void> {
   const order = ctx.session.pizzaOrder;
   if (!order) {
     await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
     return;
   }
+  if (!order.telefono) {
+    ctx.session.step = 'pizza_awaiting_email';
+    await ctx.reply(
+      'Necesitamos una forma de contactarte. Como no nos has dado teléfono, ' +
+      'escríbenos tu email.',
+      Markup.inlineKeyboard([[Markup.button.callback('📞 Mejor doy un teléfono', 'pz_skip_phone_back')]])
+    );
+    return;
+  }
   await procesarEmail(ctx, order, '');
+}
+
+// Botón "Prefiero dar email" — se salta el teléfono, pero entonces el email
+// pasa a ser obligatorio.
+export async function handlePizzaSkipPhone(ctx: BotContext): Promise<void> {
+  const order = ctx.session.pizzaOrder;
+  if (!order) {
+    await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
+    return;
+  }
+  order.telefono = '';
+  ctx.session.step = 'pizza_awaiting_email';
+  await ctx.reply('Escríbenos tu email para confirmarte la reserva:');
+}
+
+// Botón "Mejor doy un teléfono" — vuelve al paso del teléfono.
+export async function handlePizzaPhoneBack(ctx: BotContext): Promise<void> {
+  const order = ctx.session.pizzaOrder;
+  if (!order) {
+    await ctx.reply('Sesión expirada. Escribe /pizza para empezar de nuevo.');
+    return;
+  }
+  ctx.session.step = 'pizza_awaiting_phone';
+  await ctx.reply('¿Tu teléfono de contacto?');
 }
 
 // Guarda el email (puede ser cadena vacía si se salta) y decide el siguiente
@@ -399,7 +479,9 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   const order = ctx.session.pizzaOrder;
   ctx.session.step = 'idle';
 
-  if (!order || order.items.length === 0 || !order.diaRecogida || !order.horaRecogida || !order.nombre || !order.telefono) {
+  // Teléfono o email: al menos uno, para poder avisar de cualquier incidencia.
+  if (!order || order.items.length === 0 || !order.diaRecogida || !order.horaRecogida || !order.nombre
+      || (!order.telefono && !email)) {
     await ctx.reply('Faltan datos del pedido. Escribe /pizza para empezar de nuevo.');
     return;
   }
@@ -420,7 +502,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
     timestamp: new Date().toISOString(),
     telegramId,
     nombre: order.nombre,
-    telefono: order.telefono,
+    telefono: order.telefono ?? '',
     email,
     marketingConsent: order.marketingConsent ?? false,
     items: order.items,
@@ -452,7 +534,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
 
   const avisoStaff =
     `🍕 Nueva reserva de pizza — ${orderNumber}\n\n` +
-    `👤 ${order.nombre} — ${order.telefono}${email ? ' — ' + email : ' — (sin email)'}\n` +
+    `👤 ${order.nombre} — ${[order.telefono, email].filter(Boolean).join(' — ')}\n` +
     `${lineasTexto}\n` +
     `Recogida: ${recogidaTexto}\n` +
     `Total: ${precioTotal.toFixed(2)} €\n` +
@@ -547,7 +629,7 @@ export async function handlePizzaCancelConfirm(ctx: BotContext, orderNumber: str
 
   const aviso =
     `❌ Reserva cancelada — ${orderNumber}\n\n` +
-    `👤 ${cancelled.nombre} (${cancelled.telefono})\n` +
+    `👤 ${cancelled.nombre} (${cancelled.telefono || cancelled.email || 'sin contacto'})\n` +
     `${pizzaService.itemsLabel(cancelled.items)}\n` +
     `Recogida: ${pizzaService.formatPizzaDate(cancelled.diaRecogida)} ${cancelled.horaRecogida}\n` +
     `Cancelada por: ${staff ? 'administración' : 'el cliente'}`;
