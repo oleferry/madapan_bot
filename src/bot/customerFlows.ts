@@ -867,6 +867,19 @@ export async function handleCancelLine(ctx: BotContext, lineIdx: number): Promis
       dryRun: (await import('../config')).config.dryRun,
     });
 
+    // Era la única línea: Holded no admite un pedido sin líneas, así que se ha
+    // borrado el pedido entero. Hay que decirlo, no es lo mismo quitar un
+    // producto que quedarse sin pedido ese día.
+    if (result.orderDeleted) {
+      await ctx.reply(
+        `✓ "${sessionLine.name}" eliminado.\n\n` +
+        `Era el único producto del pedido, así que el pedido del ${dateStr} queda anulado. ` +
+        `No se servirá nada ese día.`,
+        Markup.inlineKeyboard([[Markup.button.callback('Menú principal', 'main_menu')]])
+      );
+      return;
+    }
+
     await ctx.reply(
       `✓ "${sessionLine.name}" eliminado del pedido.`,
       Markup.inlineKeyboard([

@@ -295,7 +295,7 @@ export async function removeLineFromOrder(
   lineId: string,
   order: HoldedOrder,
   tarifa?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; orderDeleted?: boolean }> {
   if (isDryRun) {
     log('HoldedClient', `[DRY_RUN] Would remove line ${lineId} from order ${orderId}`);
     return { success: true };
@@ -314,6 +314,17 @@ export async function removeLineFromOrder(
         name: line.name,
         sku: line.sku,
       }));
+
+    // Quitar la última línea dejaría el pedido sin ninguna. Holded ignora en
+    // silencio un PUT con "items" vacío (responde OK y no cambia nada), así
+    // que el pedido hay que borrarlo entero.
+    if (items.length === 0) {
+      await withRetry(() =>
+        getInvoicingV1Client().delete(`/documents/salesorder/${orderId}`)
+      );
+      log('HoldedClient', `Pedido ${orderId} borrado: se quitó su única línea`);
+      return { success: true, orderDeleted: true };
+    }
 
     await withRetry(() =>
       getInvoicingV1Client().put(`/documents/salesorder/${orderId}`, { items })
