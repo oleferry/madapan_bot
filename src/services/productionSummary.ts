@@ -1,4 +1,5 @@
 import { listAllOrdersForDate } from './holdedClient';
+import * as encargos from './encargosService';
 import { log } from '../utils/logger';
 
 const DAY_NAMES: Record<number, string> = {
@@ -12,9 +13,13 @@ export async function buildProductionSummary(
 ): Promise<string> {
   const dayName = DAY_NAMES[dayOfWeek] ?? '';
   const orders = await listAllOrdersForDate(dateStr);
+  // Los encargos sueltos no están en Holded, viven en el bot. Al obrador le da
+  // igual de dónde venga cada pieza: tienen que salir en el mismo resumen.
+  const textoEncargos = encargos.textoProduccion(dateStr);
 
   if (orders.length === 0) {
-    return `📦 Producción ${dateStr} (${dayName})\n\nNo se encontraron pedidos para este día.`;
+    const vacio = `📦 Producción ${dateStr} (${dayName})\n\nNo hay pedidos de clientes para este día.`;
+    return textoEncargos ? vacio + '\n' + textoEncargos : vacio;
   }
 
   // Sumar cantidades por nombre de producto
@@ -35,6 +40,7 @@ export async function buildProductionSummary(
   let text = `📦 Producción ${dateStr} (${dayName})\n`;
   text += `${orders.length} pedido(s)\n\n`;
   text += lines.join('\n');
+  if (textoEncargos) text += '\n' + textoEncargos;
 
   return text;
 }
