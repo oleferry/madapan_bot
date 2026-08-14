@@ -54,7 +54,10 @@ const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
   },
   {
     nombre: '🎂 Tartas',
-    productos: ['Tarta de limón', 'Tarta de queso con frutos rojos',
+    // La genérica va primero: casi cada tarta encargada es distinta, y lo que
+    // la define es la observación ("de chocolate, sin nata, con 'Felicidades
+    // Ana'"), no el producto. El resto son las que ya están fijadas.
+    productos: ['Tarta (genérica)', 'Tarta de limón', 'Tarta de queso con frutos rojos',
       'Tarta de San Marcos con chocolate', 'Tarta de hojaldre y crema',
       'Tarta Pavlova', 'Tarta porción'],
   },
@@ -205,8 +208,15 @@ export async function handleEncargoCantidad(ctx: BotContext, cantidad: number): 
   if (!s?.producto) return;
   s.cantidad = cantidad;
   ctx.session.step = 'enc_awaiting_nota';
+
+  // En una tarta la observación no es un extra: es lo que dice qué tarta es.
+  const esTarta = /^tarta/i.test(s.producto);
+  const pregunta = esTarta
+    ? '¿Cómo la quiere? Sabor, tamaño, decoración, si lleva alguna dedicatoria...'
+    : '¿Alguna indicación para el obrador? (por ejemplo "pocos hechos")';
+
   await ctx.reply(
-    `${cantidad} × ${s.producto}\n\n¿Alguna indicación para el obrador? (por ejemplo "pocos hechos")`,
+    `${cantidad} × ${s.producto}\n\n${pregunta}`,
     Markup.inlineKeyboard([[Markup.button.callback('Sin indicaciones', 'enc_nota_no')]])
   );
 }
