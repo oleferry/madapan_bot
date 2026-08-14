@@ -75,6 +75,18 @@ import {
   handleEncargoText,
 } from './encargoFlow';
 import {
+  handleApuntar,
+  handleProductoElegido,
+  handleApuntarLibre,
+  handleProveedorElegido,
+  handleSinProveedor,
+  handleVerCompras,
+  handleBorrador,
+  handleEnviarPedidos,
+  handleCancelarEnvio,
+  handleCompraText,
+} from './compraFlow';
+import {
   handleFoto,
   handleDocumento,
   handleProcesar,
@@ -270,6 +282,24 @@ export function createBot(): Telegraf<BotContext> {
     }
   });
 
+  // Lista de la compra (staff): se apunta lo que se acaba y cada dos
+  // semanas sale un borrador de pedido agrupado por proveedor.
+  bot.command('apuntar', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleApuntar(ctx, ctx.message.text.replace(/^\/apuntar(@\S+)?/, '').trim());
+  });
+
+  bot.command('compras', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleVerCompras(ctx);
+  });
+
+  // Fuerza el borrador quincenal sin esperar al miércoles.
+  bot.command('pedidos_ya', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleBorrador(ctx);
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -359,6 +389,8 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
+    { command: 'apuntar', description: 'Apuntar algo para pedir (staff)' },
+    { command: 'compras', description: 'Ver y enviar los pedidos a proveedor (staff)' },
     { command: 'probar_smtp', description: 'Probar el envío de correo a Holded (staff)' },
   ];
 
@@ -789,6 +821,39 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
+      if (data.startsWith('cmp_') && !isStaff(ctx)) {
+        warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
+        return;
+      }
+      if (data.startsWith('cmp_prod|')) {
+        await handleProductoElegido(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+      if (data.startsWith('cmp_prov|')) {
+        await handleProveedorElegido(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+      if (data === 'cmp_libre') {
+        await handleApuntarLibre(ctx);
+        return;
+      }
+      if (data === 'cmp_sin_prov') {
+        await handleSinProveedor(ctx);
+        return;
+      }
+      if (data === 'cmp_borrador') {
+        await handleBorrador(ctx);
+        return;
+      }
+      if (data === 'cmp_enviar') {
+        await handleEnviarPedidos(ctx);
+        return;
+      }
+      if (data === 'cmp_no') {
+        await handleCancelarEnvio(ctx);
+        return;
+      }
+
       // Facturas y albaranes de proveedor en papel
       if (data === 'fac_procesar') {
         await handleProcesar(ctx);
@@ -816,6 +881,7 @@ export function createBot(): Telegraf<BotContext> {
 
   // ── Text messages ───────────────────────────────────────────────────────────
   bot.on('text', async (ctx) => {
+    if (await handleCompraText(ctx)) return;
     if (await handleEncargoText(ctx)) return;
     const handledByPizza = await handlePizzaText(ctx);
     if (handledByPizza) return;

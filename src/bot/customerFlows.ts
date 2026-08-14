@@ -30,11 +30,13 @@ export interface SessionData {
     | 'enc_awaiting_nota'
     | 'enc_awaiting_recogida'
     | 'enc_awaiting_nif'
-    | 'enc_awaiting_razon';
+    | 'enc_awaiting_razon'
+    | 'cmp_awaiting_prov';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   encargo?: import('./encargoFlow').EncargoSessionData;
   factura?: import('./facturaFlow').FacturaSessionData;
+  compra?: import('./compraFlow').CompraSessionData;
   selectedDate?: string;
   selectedOrderId?: string;
   selectedLineId?: string;

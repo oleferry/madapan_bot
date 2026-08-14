@@ -6,6 +6,7 @@ import { scheduleDailySummary } from './jobs/dailySummaryJob';
 import { scheduleProductionSummary } from './jobs/productionSummaryJob';
 import { scheduleDailyWaybills } from './jobs/dailyWaybillsJob';
 import { scheduleWeeklyOrders } from './jobs/weeklyOrdersJob';
+import { scheduleComprasBorrador } from './jobs/comprasJob';
 import { log } from './utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -25,6 +26,8 @@ async function main(): Promise<void> {
   scheduleDailyWaybills(bot as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   scheduleWeeklyOrders(bot as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  scheduleComprasBorrador(bot as any);
 
   log('main', `Bot started. DRY_RUN=${config.dryRun}`);
 

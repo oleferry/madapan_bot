@@ -49,6 +49,11 @@ export const config = {
   pizzaExtraDatesPath: process.env['PIZZA_EXTRA_DATES_PATH'] ?? persistPath('pizza-extra-dates.json', 'data/pizza-extra-dates.json'),
   waybillMapPath: process.env['WAYBILL_MAP_PATH'] ?? persistPath('waybill-map.json', 'data/waybill-map.json'),
   encargosPath: process.env['ENCARGOS_PATH'] ?? persistPath('encargos.json', 'data/encargos.json'),
+  comprasPath: process.env['COMPRAS_PATH'] ?? persistPath('compras.json', 'data/compras.json'),
+  // Día de la semana del borrador de pedidos a proveedor (3 = miércoles).
+  // El borrador es quincenal; el job mira si han pasado 13 días.
+  comprasDow: parseInt(process.env['COMPRAS_DOW'] ?? '3', 10),
+  comprasHour: parseInt(process.env['COMPRAS_HOUR'] ?? '9', 10),
   // Facturas de proveedor: extracción con Claude y archivo en Drive.
   anthropicApiKey: process.env['ANTHROPIC_API_KEY'] ?? '',
   // OAuth de usuario, no cuenta de servicio: una cuenta de servicio no puede

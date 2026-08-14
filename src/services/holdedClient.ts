@@ -339,6 +339,114 @@ export async function removeLineFromOrder(
   }
 }
 
+// ── Compras: artículos y proveedores ─────────────────────────────────────────
+
+export interface ProductoHolded { id: string; name: string; sku: string; purchasePrice: number; }
+export interface ProveedorHolded { id: string; name: string; email: string; }
+
+// Se cachean en memoria: el catálogo entero son ~240 artículos y 195 contactos,
+// y se consultan en cada búsqueda mientras se apunta la compra.
+let cacheProductos: { datos: ProductoHolded[]; en: number } | null = null;
+let cacheProveedores: { datos: ProveedorHolded[]; en: number } | null = null;
+const VIDA_CACHE = 30 * 60 * 1000;
+
+export async function listProducts(): Promise<ProductoHolded[]> {
+  if (cacheProductos && Date.now() - cacheProductos.en < VIDA_CACHE) return cacheProductos.datos;
+  const r = await withRetry(() => getInvoicingV1Client().get<any[]>('/products'));
+  const datos = (r.data ?? [])
+    .filter(p => p.forPurchase)
+    .map(p => ({
+      id: p.id, name: p.name ?? '', sku: p.sku ?? '',
+      purchasePrice: Number(p.purchasePrice) || 0,
+    }));
+  cacheProductos = { datos, en: Date.now() };
+  log('HoldedClient', `Catálogo de compra: ${datos.length} artículos`);
+  return datos;
+}
+
+export async function listSuppliers(): Promise<ProveedorHolded[]> {
+  if (cacheProveedores && Date.now() - cacheProveedores.en < VIDA_CACHE) return cacheProveedores.datos;
+  const r = await withRetry(() => getInvoicingV1Client().get<any[]>('/contacts'));
+  const datos = (r.data ?? [])
+    .filter(c => c.type === 'supplier')
+    .map(c => ({ id: c.id, name: c.name ?? '', email: c.email ?? '' }));
+  cacheProveedores = { datos, en: Date.now() };
+  return datos;
+}
+
+// Búsqueda tolerante: sin acentos, por palabras sueltas y en cualquier orden,
+// para que "coca colas" encuentre "Coca - Cola".
+function normalizar(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ');
+}
+
+export function puntuar(nombre: string, consulta: string): number {
+  const n = normalizar(nombre);
+  const palabras = normalizar(consulta).split(/\s+/).filter(p => p.length > 2);
+  if (!palabras.length) return 0;
+  let puntos = 0;
+  for (const p of palabras) {
+    // El singular de lo que se escribe en plural ("colas" → "cola").
+    const raiz = p.replace(/(es|s)$/, '');
+    if (n.includes(p) || (raiz.length > 2 && n.includes(raiz))) puntos += 1;
+  }
+  return puntos / palabras.length;
+}
+
+export async function buscarProductos(consulta: string, limite = 6): Promise<ProductoHolded[]> {
+  const todos = await listProducts();
+  return todos
+    .map(p => ({ p, s: puntuar(p.name, consulta) }))
+    .filter(x => x.s > 0)
+    .sort((a, b) => b.s - a.s || a.p.name.length - b.p.name.length)
+    .slice(0, limite)
+    .map(x => x.p);
+}
+
+export async function buscarProveedores(consulta: string, limite = 6): Promise<ProveedorHolded[]> {
+  const todos = await listSuppliers();
+  return todos
+    .map(p => ({ p, s: puntuar(p.name, consulta) }))
+    .filter(x => x.s > 0)
+    .sort((a, b) => b.s - a.s || a.p.name.length - b.p.name.length)
+    .slice(0, limite)
+    .map(x => x.p);
+}
+
+// Pedido de compra al proveedor. Se crea SIN aprobar: es un borrador que
+// alguien revisa en Holded, no un documento contable definitivo.
+export async function createPurchaseOrder(
+  contactId: string,
+  lineas: Array<{ name: string; sku?: string; units: number; price: number }>,
+  notas?: string
+): Promise<string | null> {
+  if (isDryRun) {
+    log('HoldedClient', `[DRY_RUN] Pedido de compra a ${contactId}, ${lineas.length} líneas`);
+    return 'dry-run';
+  }
+  try {
+    const r = await withRetry(() =>
+      getInvoicingV1Client().post<any>('/documents/purchaseorder', {
+        contactId,
+        date: Math.floor(Date.now() / 1000),
+        ...(notas ? { notes: notas } : {}),
+        items: lineas.map(l => ({
+          name: l.name,
+          ...(l.sku ? { sku: l.sku } : {}),
+          units: l.units,
+          price: l.price,
+        })),
+      })
+    );
+    const id = r.data?.id ?? null;
+    log('HoldedClient', `Pedido de compra creado: ${id}`);
+    return id;
+  } catch (err) {
+    warn('HoldedClient', `No se pudo crear el pedido de compra: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 export async function listAllOrdersForDate(dateStr: string): Promise<HoldedOrder[]> {
   try {
     log('HoldedClient', `listAllOrdersForDate(${dateStr})...`);

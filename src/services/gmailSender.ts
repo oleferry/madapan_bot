@@ -64,6 +64,28 @@ function construirMime(para: string, asunto: string, nombre: string, pdf: Buffer
   ].join('\r\n');
 }
 
+// Correo de solo texto, sin adjunto: los pedidos a proveedor.
+export async function enviarTexto(para: string, asunto: string, cuerpo: string): Promise<void> {
+  if (!estaConfigurado()) {
+    throw new Error(`Faltan variables: ${queFalta().join(', ')}`);
+  }
+  const mime = [
+    `From: ${config.gmailRemitente}`,
+    `To: ${para}`,
+    `Subject: ${cabecera(asunto)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(cuerpo, 'utf-8').toString('base64').replace(/(.{76})/g, '$1\n'),
+  ].join('\r\n');
+  await api().users.messages.send({
+    userId: 'me',
+    requestBody: { raw: Buffer.from(mime).toString('base64url') },
+  });
+  log('GmailSender', `Enviado "${asunto}" a ${para}`);
+}
+
 export async function enviar(para: string, asunto: string, nombre: string, pdf: Buffer): Promise<void> {
   if (!estaConfigurado()) {
     throw new Error(`Faltan variables: ${queFalta().join(', ')}`);
