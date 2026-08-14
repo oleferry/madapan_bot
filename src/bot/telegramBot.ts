@@ -240,6 +240,24 @@ export function createBot(): Telegraf<BotContext> {
     await handleEncargosResumen(ctx, desde, hasta);
   });
 
+  // Diagnóstico del envío a Holded: conecta y autentica sin mandar nada.
+  // Sirve para saber si el problema es la contraseña o un puerto filtrado.
+  bot.command('probar_smtp', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const holdedInbox = await import('../services/holdedInbox');
+    if (!holdedInbox.estaConfigurado()) {
+      await ctx.reply(`Sin configurar. Faltan: ${holdedInbox.queFalta().join(', ')}`);
+      return;
+    }
+    await ctx.reply('Probando conexión con el servidor de correo...');
+    try {
+      const { puerto } = await holdedInbox.probarConexion();
+      await ctx.reply(`✅ Conecta y autentica por el puerto ${puerto}.`);
+    } catch (err) {
+      await ctx.reply(`❌ No conecta:\n${(err as Error).message}`);
+    }
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -329,6 +347,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Ver los encargos de un día (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
+    { command: 'probar_smtp', description: 'Probar el envío de correo a Holded (staff)' },
   ];
 
   // Comandos públicos → visibles para todos los usuarios (scope por defecto)
