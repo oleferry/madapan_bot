@@ -24,32 +24,40 @@ export interface EncargoSessionData {
   notaRecogida?: string;
 }
 
-// Catálogo del encargo. No sale de data/catalog.json porque hay cosas que se
-// encargan (empanadas, asados, tarta de limón) que todavía NO existen como
-// producto en Holded. Como esta fase no toca Holded, valen por nombre; cuando
-// se creen allí habrá que enlazarlos por SKU.
+// Catálogo del encargo. No sale de data/catalog.json, que solo tiene los 20
+// productos del pedido B2B semanal. Los nombres están escritos EXACTAMENTE
+// como están en Holded para poder enlazarlos por SKU en la fase 3; el único
+// que todavía no existe allí es la tarta de limón.
 const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
   {
     nombre: '🥖 Pan',
-    productos: ['Barra', 'Barra grande', 'Barra pequeña', 'Chapata', 'Pan de cuadros',
-      'Pan de cuadros pequeño', 'Pan de cuadros grande', 'Pan pequeño', 'Hogaza',
-      'Hogaza MM centeno', 'Hogaza MM semillas', 'Pan integral', 'Pan de canteros',
-      'Pan de pasas y nueces', 'Barra de picos'],
+    // "barras grandes" y "pan de cuadros grande" del grupo de WhatsApp son
+    // estos: en Holded la grande es la normal, y lo que hay por encima es XL.
+    productos: ['Barra', 'Barra pequeña', 'Barra bocadillo', 'Chapata',
+      'Pan de cuadros', 'Pan de cuadros pequeño', 'Pan de cuadros XL',
+      'Mini pan de cuadros', 'Hogaza', 'Hogaza MM centeno', 'Pan de semillas',
+      'Pan Integral', 'Pan de canteros', 'Pan pasas y nueces', 'Barra de picos'],
   },
   {
     nombre: '🍪 Dulces',
-    productos: ['Caja de magdalenas 1/2kg', 'Pastas de Lola', 'Rosquillas',
-      'Torta de aceite', 'Torta de azúcar', 'Bizcocho normal', 'Bizcocho de nueces',
-      'Bizcocho de chocolate'],
+    productos: ['Caja de magdalenas de 1/2kg', 'Pastas de Lola 500 gr',
+      'Rosquillas 500gr', 'Rosquillas 1kg', 'Torta de aceite', 'Torta azúcar',
+      'Bizcocho', 'Bizcocho con nueces', 'Bizcocho con chocolate'],
   },
   {
     nombre: '🧁 Repostería',
-    productos: ['Donuts', 'Pain au chocolat', 'Panettone', 'Tarta de limón'],
+    // "Tarta de limón" todavía no existe en Holded: se pide en el grupo pero
+    // no está dada de alta. Aquí vale por nombre porque esta fase no factura.
+    productos: ['Donut’s pink', 'Dónuts glass', 'Pain au chocolat',
+      'Panettone clásico', 'Panettone chocolate', 'Tarta de limón'],
   },
   {
     nombre: '🥟 Empanadas',
+    // Las cuatro por relleno, a 20 €/kg. El peso varía por pieza, así que la
+    // cantidad que se apunta aquí son PIEZAS; el kilaje se ve al pesarla.
     productos: ['Empanada de atún y pisto', 'Empanada de bonito',
-      'Empanada de bacon, queso y pimientos', 'Empanada de cecina'],
+      'Empanada de bacon, queso y pimientos', 'Empanada de cecina',
+      'Empanada 100gr', 'Porción empanada 150 g'],
   },
   {
     nombre: '🍖 Asados',
