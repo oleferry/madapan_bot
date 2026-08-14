@@ -20,7 +20,7 @@ export interface CompraSessionData {
   producto?: string;
   sku?: string;
   holdedId?: string;
-  candidatos?: Array<{ id: string; name: string; sku: string }>;
+  candidatos?: Array<{ id: string; name: string; sku: string; proveedorId?: string }>;
   proveedores?: Array<{ id: string; name: string; email: string }>;
 }
 
@@ -49,7 +49,10 @@ export async function handleApuntar(ctx: BotContext, texto: string): Promise<voi
   ctx.session.compra = s;
 
   const encontrados = await holded.buscarProductos(consulta);
-  s.candidatos = encontrados.map(p => ({ id: p.id, name: p.name, sku: p.sku }));
+  s.candidatos = encontrados.map(p => ({
+    id: p.id, name: p.name, sku: p.sku,
+    ...(p.proveedorId ? { proveedorId: p.proveedorId } : {}),
+  }));
 
   if (!encontrados.length) {
     await ctx.reply(
@@ -72,7 +75,7 @@ export async function handleProductoElegido(ctx: BotContext, idx: number): Promi
   s.producto = p.name;
   if (p.sku) s.sku = p.sku;
   s.holdedId = p.id;
-  await pedirProveedorSiHaceFalta(ctx);
+  await pedirProveedorSiHaceFalta(ctx, p.proveedorId);
 }
 
 export async function handleApuntarLibre(ctx: BotContext): Promise<void> {
@@ -85,15 +88,27 @@ export async function handleApuntarLibre(ctx: BotContext): Promise<void> {
   await pedirProveedorSiHaceFalta(ctx);
 }
 
-async function pedirProveedorSiHaceFalta(ctx: BotContext): Promise<void> {
+async function pedirProveedorSiHaceFalta(ctx: BotContext, proveedorEnHolded?: string): Promise<void> {
   const s = ctx.session.compra;
   if (!s?.producto) return;
 
   // Si ya se preguntó una vez por este artículo, no se vuelve a preguntar.
   const sabido = compras.proveedorDe(s.producto, s.sku);
   if (sabido) {
-    guardar(ctx, sabido.proveedorId, sabido.proveedorNombre);
+    guardar(ctx, sabido.proveedorId, sabido.proveedorNombre,
+      sabido.proveedorEmail ? undefined : sabido.proveedorNombre);
     return;
+  }
+
+  // Si en la ficha de Holded ya hay proveedor puesto a mano, manda ese: es la
+  // fuente buena, y así no se pregunta por algo que ya está decidido.
+  if (proveedorEnHolded) {
+    const prov = (await holded.listSuppliers()).find(p => p.id === proveedorEnHolded);
+    if (prov) {
+      compras.aprenderProveedor(s.producto, s.sku, prov.id, prov.name, prov.email);
+      guardar(ctx, prov.id, prov.name, prov.email ? undefined : prov.name);
+      return;
+    }
   }
   ctx.session.step = 'cmp_awaiting_prov';
   await ctx.reply(

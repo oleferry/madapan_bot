@@ -341,7 +341,20 @@ export async function removeLineFromOrder(
 
 // ── Compras: artículos y proveedores ─────────────────────────────────────────
 
-export interface ProductoHolded { id: string; name: string; sku: string; purchasePrice: number; }
+export interface ProductoHolded {
+  id: string; name: string; sku: string; purchasePrice: number;
+  proveedorId?: string;   // el que esté asignado a mano en la ficha de Holded
+}
+
+// Holded devuelve el proveedor de la ficha como {"$oid": "..."} y deja
+// contactName vacío. Si se lee tal cual, se compara un objeto con un id y
+// nunca casa: por eso "Cerveza" no encontraba a Josefina de la Calle.
+function idDeContacto(v: unknown): string | undefined {
+  if (!v) return undefined;
+  if (typeof v === 'string') return v || undefined;
+  const oid = (v as { $oid?: string }).$oid;
+  return oid || undefined;
+}
 export interface ProveedorHolded { id: string; name: string; email: string; }
 
 // Se cachean en memoria: el catálogo entero son ~240 artículos y 195 contactos,
@@ -355,10 +368,14 @@ export async function listProducts(): Promise<ProductoHolded[]> {
   const r = await withRetry(() => getInvoicingV1Client().get<any[]>('/products'));
   const datos = (r.data ?? [])
     .filter(p => p.forPurchase)
-    .map(p => ({
-      id: p.id, name: p.name ?? '', sku: p.sku ?? '',
-      purchasePrice: Number(p.purchasePrice) || 0,
-    }));
+    .map(p => {
+      const proveedorId = idDeContacto(p.contactId);
+      return {
+        id: p.id, name: p.name ?? '', sku: p.sku ?? '',
+        purchasePrice: Number(p.purchasePrice) || 0,
+        ...(proveedorId ? { proveedorId } : {}),
+      };
+    });
   cacheProductos = { datos, en: Date.now() };
   log('HoldedClient', `Catálogo de compra: ${datos.length} artículos`);
   return datos;
