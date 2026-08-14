@@ -74,11 +74,28 @@ export async function enviar(para: string, asunto: string, nombre: string, pdf: 
   log('GmailSender', `Enviado "${nombre}" a ${para}`);
 }
 
-// Comprueba que el token vale para enviar, sin mandar nada.
+// Comprueba que el token sirve para enviar, sin mandar nada.
+//
+// No vale llamar a users.getProfile: eso exige permiso de LECTURA del buzón,
+// que deliberadamente no pedimos. Se renueva el token y se mira qué permisos
+// trae, que es lo único que se puede saber con gmail.send a secas.
 export async function probar(): Promise<string> {
   if (!estaConfigurado()) {
     throw new Error(`Faltan variables: ${queFalta().join(', ')}`);
   }
-  const r = await api().users.getProfile({ userId: 'me' });
-  return r.data.emailAddress ?? '(desconocido)';
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    body: new URLSearchParams({
+      client_id: config.googleOauthClientId,
+      client_secret: config.googleOauthClientSecret,
+      refresh_token: config.googleOauthRefreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+  const j = await r.json() as { scope?: string; error?: string; error_description?: string };
+  if (j.error) throw new Error(`${j.error}: ${j.error_description ?? ''}`.trim());
+  if (!j.scope?.includes('gmail.send')) {
+    throw new Error('el token no tiene permiso de envío (falta gmail.send)');
+  }
+  return config.gmailRemitente;
 }
