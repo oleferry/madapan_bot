@@ -50,7 +50,13 @@ const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
   {
     nombre: '🧁 Repostería',
     productos: ['Donut’s pink', 'Dónuts glass', 'Pain au chocolat',
-      'Panettone clásico', 'Panettone chocolate', 'Tarta de limón'],
+      'Croissant', 'Cinnamon roll', 'Panettone clásico', 'Panettone chocolate'],
+  },
+  {
+    nombre: '🎂 Tartas',
+    productos: ['Tarta de limón', 'Tarta de queso con frutos rojos',
+      'Tarta de San Marcos con chocolate', 'Tarta de hojaldre y crema',
+      'Tarta Pavlova', 'Tarta porción'],
   },
   {
     nombre: '🥟 Empanadas',

@@ -20,6 +20,7 @@ export interface FacturaSessionData {
   paginas: Array<{ datos: string; mimeType: string }>;   // base64, en orden
   doc?: extractor.DocumentoProveedor;
   pdf?: string;                                          // base64 del PDF montado
+  archivando?: boolean;                                  // evita subirla dos veces
 }
 
 const MAX_PAGINAS = 8;
@@ -165,6 +166,14 @@ export async function handleArchivar(ctx: BotContext): Promise<void> {
     await ctx.reply('Ese documento ya no está en curso. Vuelve a mandar la foto.');
     return;
   }
+
+  // Si el envío tarda, Telegram deja de responder al botón y el usuario
+  // vuelve a pulsarlo. Sin este cerrojo, la factura acaba dos veces en Drive.
+  if (sesion.archivando) {
+    await ctx.reply('Esa factura ya se está archivando, dame un momento.');
+    return;
+  }
+  sesion.archivando = true;
 
   const doc = sesion.doc;
   const pdf = Buffer.from(sesion.pdf, 'base64');

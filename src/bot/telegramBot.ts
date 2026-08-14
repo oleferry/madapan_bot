@@ -127,7 +127,10 @@ async function sendResumenYProduccion(ctx: { reply: (text: string) => Promise<un
 }
 
 export function createBot(): Telegraf<BotContext> {
-  const bot = new Telegraf<BotContext>(config.telegramBotToken);
+  // Por defecto Telegraf corta el handler a los 90 s. Archivar una factura
+  // (leerla, subirla a Drive y enviarla por correo) se pasa de ahí, y al
+  // cortarse el usuario vuelve a pulsar y se sube dos veces.
+  const bot = new Telegraf<BotContext>(config.telegramBotToken, { handlerTimeout: 5 * 60 * 1000 });
 
   // Session middleware
   bot.use(
@@ -205,7 +208,12 @@ export function createBot(): Telegraf<BotContext> {
 
   // Encargos sueltos (staff): lo que hoy se apunta a mano en el grupo de WhatsApp
   bot.command('encargo', async (ctx) => {
-    if (!isStaff(ctx)) return;
+    log('TelegramBot', `/encargo de ${ctx.from?.id} (staff: ${isStaff(ctx)})`);
+    if (!isStaff(ctx)) {
+      // Antes no contestaba nada y parecía que el bot estaba roto.
+      await ctx.reply('Los encargos solo los puede apuntar el personal de Madapan.');
+      return;
+    }
     await handleEncargoStart(ctx);
   });
 
