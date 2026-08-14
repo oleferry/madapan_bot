@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import * as gmail from './gmailSender';
 import { log, warn } from '../utils/logger';
 
 // Envío de la factura al buzón de Holded ("Inbox" / recepción de documentos).
@@ -14,16 +15,20 @@ const SMTP_USER = process.env['SMTP_USER'] ?? '';
 const SMTP_PASS = process.env['SMTP_PASS'] ?? '';
 const HOLDED_INBOX = process.env['HOLDED_INBOX_EMAIL'] ?? '';
 
+function haySmtp(): boolean {
+  return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
+}
+
 export function estaConfigurado(): boolean {
-  return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS && HOLDED_INBOX);
+  return Boolean(HOLDED_INBOX) && (haySmtp() || gmail.estaConfigurado());
 }
 
 export function queFalta(): string[] {
   const faltan: string[] = [];
-  if (!SMTP_HOST) faltan.push('SMTP_HOST');
-  if (!SMTP_USER) faltan.push('SMTP_USER');
-  if (!SMTP_PASS) faltan.push('SMTP_PASS');
   if (!HOLDED_INBOX) faltan.push('HOLDED_INBOX_EMAIL');
+  if (!haySmtp() && !gmail.estaConfigurado()) {
+    faltan.push('una vía de envío: SMTP_HOST/USER/PASS o GMAIL_REMITENTE');
+  }
   return faltan;
 }
 
@@ -43,28 +48,48 @@ function transporte(puerto: number): nodemailer.Transporter {
     auth: { user: SMTP_USER, pass: SMTP_PASS },
     // Sin esto, un puerto filtrado se queda colgado hasta el timeout del
     // sistema y el bot parece muerto durante minutos.
-    connectionTimeout: 15000,
-    greetingTimeout: 10000,
-    socketTimeout: 30000,
+    // Cortos a propósito: se prueban dos puertos, y si uno está filtrado no
+    // tiene sentido dejar al usuario esperando medio minuto por cada uno.
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 20000,
   });
 }
 
-// Conecta y autentica sin enviar nada. Devuelve el puerto que funcionó.
-export async function probarConexion(): Promise<{ puerto: number; errores: string[] }> {
-  if (!estaConfigurado()) {
-    throw new Error(`Faltan variables de entorno: ${queFalta().join(', ')}`);
-  }
-  const errores: string[] = [];
-  for (const puerto of puertosAProbar()) {
-    try {
-      await transporte(puerto).verify();
-      return { puerto, errores };
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      errores.push(`${puerto}: ${e.code ?? ''} ${e.message}`.trim());
+// Comprueba las vías de envío sin mandar nada. Informa de las dos por
+// separado: basta con que una funcione.
+export async function probarConexion(): Promise<string> {
+  const partes: string[] = [];
+
+  if (haySmtp()) {
+    let ok = false;
+    for (const puerto of puertosAProbar()) {
+      try {
+        await transporte(puerto).verify();
+        partes.push(`✅ SMTP por el puerto ${puerto}`);
+        ok = true;
+        break;
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        partes.push(`❌ SMTP ${puerto}: ${e.code ?? e.message}`);
+      }
     }
+    if (!ok) partes.push('(Railway bloquea el SMTP saliente; se usará Gmail)');
+  } else {
+    partes.push('⏭️ SMTP sin configurar');
   }
-  throw new Error(errores.join(' | '));
+
+  if (gmail.estaConfigurado()) {
+    try {
+      partes.push(`✅ Gmail API como ${await gmail.probar()}`);
+    } catch (err) {
+      partes.push(`❌ Gmail API: ${(err as Error).message}`);
+    }
+  } else {
+    partes.push(`⏭️ Gmail API sin configurar (${gmail.queFalta().join(', ')})`);
+  }
+
+  return partes.join('\n');
 }
 
 export async function enviarAHolded(pdf: Buffer, nombre: string, asunto: string): Promise<void> {
@@ -80,16 +105,32 @@ export async function enviarAHolded(pdf: Buffer, nombre: string, asunto: string)
   };
 
   const errores: string[] = [];
-  for (const puerto of puertosAProbar()) {
+
+  // La API de Gmail va por HTTPS y es la que funciona desde Railway, así que
+  // se prueba primero. El SMTP queda de reserva para ejecución en local.
+  if (gmail.estaConfigurado()) {
     try {
-      await transporte(puerto).sendMail(mensaje);
-      log('HoldedInbox', `Enviado "${nombre}" a ${HOLDED_INBOX} por el puerto ${puerto}`);
+      await gmail.enviar(HOLDED_INBOX, asunto, nombre, pdf);
       return;
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      warn('HoldedInbox', `Puerto ${puerto} falló: ${e.code ?? ''} ${e.message}`);
-      errores.push(`${puerto}: ${e.code ?? e.message}`);
+      warn('HoldedInbox', `Gmail falló: ${(err as Error).message}`);
+      errores.push(`Gmail: ${(err as Error).message}`);
     }
   }
+
+  if (haySmtp()) {
+    for (const puerto of puertosAProbar()) {
+      try {
+        await transporte(puerto).sendMail(mensaje);
+        log('HoldedInbox', `Enviado "${nombre}" a ${HOLDED_INBOX} por el puerto ${puerto}`);
+        return;
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        warn('HoldedInbox', `Puerto ${puerto} falló: ${e.code ?? ''} ${e.message}`);
+        errores.push(`SMTP ${puerto}: ${e.code ?? e.message}`);
+      }
+    }
+  }
+
   throw new Error(errores.join(' | '));
 }

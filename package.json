@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
     "@googleapis/drive": "^21.0.0",
+    "@googleapis/gmail": "^18.0.0",
     "@googleapis/sheets": "^14.0.0",
     "axios": "^1.7.2",
     "date-fns": "^3.6.0",

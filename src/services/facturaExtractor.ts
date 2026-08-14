@@ -140,7 +140,17 @@ export async function extraerDocumento(
     throw new Error('El modelo no devolvió datos estructurados');
   }
   log('FacturaExtractor', `${mimeType}: ${r.usage.input_tokens} tokens de entrada`);
-  return uso.input as unknown as DocumentoProveedor;
+
+  // Aunque el esquema marque campos obligatorios, un documento del que no se
+  // saca nada puede volver sin "lineas". Se normaliza aquí y no en cada sitio
+  // que lo use: un albarán borroso no debe tumbar el flujo entero.
+  const doc = uso.input as unknown as DocumentoProveedor;
+  doc.lineas ??= [];
+  doc.tipo ??= 'factura';
+  doc.proveedor ??= '';
+  doc.num_documento ??= '';
+  doc.fecha ??= '';
+  return doc;
 }
 
 // Comprobación aritmética: es lo que separa una extracción buena de una

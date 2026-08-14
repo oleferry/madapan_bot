@@ -62,6 +62,9 @@ export const config = {
   // acierta la que no es.
   driveFacturasFolderId: process.env['DRIVE_FACTURAS_FOLDER_ID'] ?? '',
   driveAlbaranesFolderId: process.env['DRIVE_ALBARANES_FOLDER_ID'] ?? '',
+  // Remitente del envío a Holded por la API de Gmail. Railway bloquea el SMTP
+  // saliente (587 y 465 dan ETIMEDOUT), así que el correo sale por HTTPS.
+  gmailRemitente: process.env['GMAIL_REMITENTE'] ?? '',
 };
 
 export const isDryRun = config.dryRun;

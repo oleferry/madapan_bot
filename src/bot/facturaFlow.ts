@@ -134,6 +134,10 @@ async function procesar(ctx: BotContext, pdf: Buffer, mimeType: string): Promise
   txt += `Fecha: ${doc.fecha}\n`;
   if (doc.total) txt += `Total: ${doc.total.toFixed(2)} €\n`;
   txt += `Líneas: ${doc.lineas.length}\n\n`;
+  if (!doc.lineas.length) {
+    txt += '⚠️ No he sacado ninguna línea de producto. Si la foto está borrosa o ' +
+      'cortada, repítela; si no, se archiva igual y las líneas se meten a mano.\n\n';
+  }
   txt += `Se archivará como:\n"${nombre}"\nen ${anio}/${mes}\n`;
 
   if (descuadres.length) {
@@ -185,15 +189,20 @@ export async function handleArchivar(ctx: BotContext): Promise<void> {
 
   await ctx.reply('Archivando...');
 
-  let resultado = '';
+  // El Drive se confirma en cuanto termina, sin esperar al correo: si el
+  // envío a Holded tarda o falla, el usuario ya sabe que el papel está a
+  // salvo y no vuelve a pulsar el botón.
   try {
     const subida = await drive.subirFactura(pdf, nombre, anio, mes, raiz);
-    resultado += `✅ Guardado en Drive (${subida.carpeta})\n`;
-    if (subida.webViewLink) resultado += `${subida.webViewLink}\n`;
+    await ctx.reply(
+      `✅ Guardado en Drive (${subida.carpeta})\n${subida.webViewLink}`.trim()
+    );
   } catch (err) {
     error('FacturaFlow', `Drive falló: ${(err as Error).message}`);
-    resultado += `❌ Drive: ${(err as Error).message}\n`;
+    await ctx.reply(`❌ Drive: ${(err as Error).message}`);
   }
+
+  let resultado = '';
 
   // Los albaranes no van a Holded: allí entra la factura, que es el documento
   // contable. El albarán se archiva para poder cotejarlo después.
@@ -213,7 +222,7 @@ export async function handleArchivar(ctx: BotContext): Promise<void> {
 
   delete ctx.session.factura;
   log('FacturaFlow', `Archivado ${nombre} por ${ctx.from?.id}`);
-  await ctx.reply(resultado);
+  if (resultado) await ctx.reply(resultado.trim());
 }
 
 export async function handleDescartar(ctx: BotContext): Promise<void> {

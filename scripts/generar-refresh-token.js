@@ -16,7 +16,13 @@ const { OAuth2Client } = require('google-auth-library');
 
 const PUERTO = 53682;
 const REDIRECT = `http://localhost:${PUERTO}`;
-const SCOPES = ['https://www.googleapis.com/auth/drive'];
+// drive: archivar las facturas. gmail.send: mandarlas al buzón de Holded
+// (Railway bloquea el SMTP saliente, así que el correo sale por HTTPS).
+// gmail.send SOLO permite enviar; no da acceso a leer el correo.
+const SCOPES = [
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/gmail.send',
+];
 
 const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;

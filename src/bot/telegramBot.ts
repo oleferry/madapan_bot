@@ -257,12 +257,11 @@ export function createBot(): Telegraf<BotContext> {
       await ctx.reply(`Sin configurar. Faltan: ${holdedInbox.queFalta().join(', ')}`);
       return;
     }
-    await ctx.reply('Probando conexión con el servidor de correo...');
+    await ctx.reply('Probando las vías de envío...');
     try {
-      const { puerto } = await holdedInbox.probarConexion();
-      await ctx.reply(`✅ Conecta y autentica por el puerto ${puerto}.`);
+      await ctx.reply(await holdedInbox.probarConexion());
     } catch (err) {
-      await ctx.reply(`❌ No conecta:\n${(err as Error).message}`);
+      await ctx.reply(`❌ ${(err as Error).message}`);
     }
   });
 
