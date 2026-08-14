@@ -28,7 +28,9 @@ export interface SessionData {
     | 'enc_awaiting_name'
     | 'enc_awaiting_cantidad'
     | 'enc_awaiting_nota'
-    | 'enc_awaiting_recogida';
+    | 'enc_awaiting_recogida'
+    | 'enc_awaiting_nif'
+    | 'enc_awaiting_razon';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   encargo?: import('./encargoFlow').EncargoSessionData;

@@ -17,6 +17,16 @@ export interface EncargoLinea {
   nota?: string;
 }
 
+// Datos fiscales. Solo se piden y se guardan cuando el cliente es empresa o
+// autónomo y PIDE factura: para un particular que se lleva dos empanadas no
+// hacen ninguna falta, y guardar datos que no necesitas es lo que no hay que
+// hacer. El resto de encargos solo tienen nombre y móvil.
+export interface DatosFactura {
+  nif: string;
+  razonSocial: string;
+  email?: string;
+}
+
 export interface Encargo {
   id: string;
   fecha: string;              // AAAA-MM-DD, día de recogida
@@ -24,6 +34,7 @@ export interface Encargo {
   nombre: string;
   lineas: EncargoLinea[];
   notaRecogida?: string;      // "lo recoge con las pizzas a las 21:00"
+  factura?: DatosFactura;     // solo si pidió factura
   creadoPor: string;          // telegramId de quien lo apuntó
   creadoEn: string;           // ISO
   estado: 'pendiente' | 'confirmado' | 'cancelado';
@@ -37,6 +48,14 @@ export interface ClienteEncargo {
   primerEncargo: string;
   ultimoEncargo: string;
   totalEncargos: number;
+  // Se guardan en el cliente para no volver a pedirlos si repite.
+  factura?: DatosFactura;
+}
+
+// Recurrente = ha encargado más de una vez. Los de una sola vez son los
+// "de paso": puede que vuelvan o puede que no, y por eso van aparte.
+export function esRecurrente(c: ClienteEncargo): boolean {
+  return c.totalEncargos > 1;
 }
 
 interface Almacen {
@@ -103,6 +122,7 @@ export interface NuevoEncargo {
   nombre: string;
   lineas: EncargoLinea[];
   notaRecogida?: string;
+  factura?: DatosFactura;
   creadoPor: string;
 }
 
@@ -123,6 +143,7 @@ export function crearEncargo(datos: NuevoEncargo): Encargo {
   cliente.nombre = datos.nombre;   // por si lo han escrito mejor esta vez
   cliente.ultimoEncargo = datos.fecha > cliente.ultimoEncargo ? datos.fecha : cliente.ultimoEncargo;
   cliente.totalEncargos += 1;
+  if (datos.factura) cliente.factura = datos.factura;
 
   const encargo: Encargo = {
     id: `E${Date.now().toString(36).toUpperCase()}`,
@@ -131,6 +152,7 @@ export function crearEncargo(datos: NuevoEncargo): Encargo {
     nombre: datos.nombre,
     lineas: datos.lineas,
     ...(datos.notaRecogida ? { notaRecogida: datos.notaRecogida } : {}),
+    ...(datos.factura ? { factura: datos.factura } : {}),
     creadoPor: datos.creadoPor,
     creadoEn: ahora,
     estado: 'pendiente',
@@ -168,17 +190,7 @@ export interface TotalProducto {
 }
 
 export function totalesDelDia(fecha: string): TotalProducto[] {
-  const mapa = new Map<string, TotalProducto>();
-  for (const e of encargosDelDia(fecha)) {
-    for (const l of e.lineas) {
-      const clave = l.producto.toLowerCase().trim();
-      const t = mapa.get(clave) ?? { producto: l.producto, cantidad: 0, notas: [] };
-      t.cantidad += l.cantidad;
-      if (l.nota) t.notas.push(`${l.cantidad} ${l.nota} (${e.nombre})`);
-      mapa.set(clave, t);
-    }
-  }
-  return [...mapa.values()].sort((a, b) => b.cantidad - a.cantidad);
+  return totalesDe(encargosDelDia(fecha));
 }
 
 // Bloque de texto para el resumen de producción.
@@ -195,6 +207,82 @@ export function textoProduccion(fecha: string): string {
   if (conRecogida.length) {
     txt += `\n  Recogidas:\n`;
     for (const e of conRecogida) txt += `    · ${e.nombre}: ${e.notaRecogida}\n`;
+  }
+  return txt;
+}
+
+// ── Resumen para la hoja ──────────────────────────────────────────────────────
+
+// Encargos de un rango de fechas (ambas incluidas), sin los cancelados.
+export function encargosEntre(desde: string, hasta: string): Encargo[] {
+  return cargar().encargos
+    .filter(e => e.estado !== 'cancelado' && e.fecha >= desde && e.fecha <= hasta)
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+function totalesDe(lista: Encargo[]): TotalProducto[] {
+  const mapa = new Map<string, TotalProducto>();
+  for (const e of lista) {
+    for (const l of e.lineas) {
+      const clave = l.producto.toLowerCase().trim();
+      const t = mapa.get(clave) ?? { producto: l.producto, cantidad: 0, notas: [] };
+      t.cantidad += l.cantidad;
+      if (l.nota) t.notas.push(`${l.cantidad} ${l.nota} (${e.nombre})`);
+      mapa.set(clave, t);
+    }
+  }
+  return [...mapa.values()].sort((a, b) => b.cantidad - a.cantidad);
+}
+
+export interface ResumenEncargos {
+  desde: string;
+  hasta: string;
+  recurrentes: { clientes: number; encargos: number; totales: TotalProducto[] };
+  dePaso: { clientes: number; encargos: number; totales: TotalProducto[] };
+  conFactura: Encargo[];
+}
+
+// Separa los encargos en dos bloques: clientes que repiten y clientes de una
+// sola vez. Son dos cosas distintas para planificar: los recurrentes son
+// previsibles y acabarán en la hoja; los de paso, no.
+export function resumenEncargos(desde: string, hasta: string): ResumenEncargos {
+  const lista = encargosEntre(desde, hasta);
+  const recurrentes: Encargo[] = [];
+  const dePaso: Encargo[] = [];
+  for (const e of lista) {
+    const c = buscarCliente(e.telefono);
+    (c && esRecurrente(c) ? recurrentes : dePaso).push(e);
+  }
+  const distintos = (l: Encargo[]): number => new Set(l.map(e => e.telefono)).size;
+  return {
+    desde, hasta,
+    recurrentes: { clientes: distintos(recurrentes), encargos: recurrentes.length, totales: totalesDe(recurrentes) },
+    dePaso: { clientes: distintos(dePaso), encargos: dePaso.length, totales: totalesDe(dePaso) },
+    conFactura: lista.filter(e => e.factura),
+  };
+}
+
+// Texto del resumen. Las cantidades van separadas por tabulador para poder
+// pegarlas en la hoja: al pegar, el tabulador reparte en columnas solo.
+export function textoResumen(r: ResumenEncargos): string {
+  const bloque = (titulo: string, b: ResumenEncargos['recurrentes']): string => {
+    if (!b.encargos) return `${titulo}\n  (ninguno)\n`;
+    let t = `${titulo}\n  ${b.encargos} encargo(s), ${b.clientes} cliente(s)\n`;
+    for (const p of b.totales) t += `  ${p.producto}\t${p.cantidad}\n`;
+    return t;
+  };
+
+  const mismo = r.desde === r.hasta;
+  let txt = `📋 ENCARGOS ${mismo ? r.desde : `${r.desde} → ${r.hasta}`}\n\n`;
+  txt += bloque('— CLIENTES RECURRENTES —', r.recurrentes);
+  txt += '\n';
+  txt += bloque('— CLIENTES DE PASO —', r.dePaso);
+
+  if (r.conFactura.length) {
+    txt += `\n— CON FACTURA (${r.conFactura.length}) —\n`;
+    for (const e of r.conFactura) {
+      txt += `  ${e.fecha} · ${e.factura!.razonSocial} · ${e.factura!.nif} · ${e.id}\n`;
+    }
   }
   return txt;
 }

@@ -22,6 +22,9 @@ export interface EncargoSessionData {
   producto?: string;
   cantidad?: number;
   notaRecogida?: string;
+  // Solo se rellena si es empresa o autónomo y pide factura.
+  nif?: string;
+  razonSocial?: string;
 }
 
 // Catálogo del encargo. No sale de data/catalog.json, que solo tiene los 20
@@ -264,6 +267,7 @@ async function confirmar(ctx: BotContext): Promise<void> {
   txt += `Para el ${formatDateSpanish(s.fecha)}\n\n`;
   for (const l of s.lineas) txt += `  ${l.cantidad} × ${l.producto}${l.nota ? ` — ${l.nota}` : ''}\n`;
   if (s.notaRecogida) txt += `\nRecogida: ${s.notaRecogida}\n`;
+  if (s.nif) txt += `\n🧾 Con factura: ${s.razonSocial} — ${s.nif}\n`;
   ctx.session.step = 'idle';
   await ctx.reply(txt, Markup.inlineKeyboard([
     [Markup.button.callback('✅ Guardar', 'enc_ok')],
@@ -273,7 +277,68 @@ async function confirmar(ctx: BotContext): Promise<void> {
 
 export async function handleEncargoRecogidaNo(ctx: BotContext): Promise<void> {
   if (!esStaff(ctx)) return;
+  await preguntarFactura(ctx);
+}
+
+// ── Factura ───────────────────────────────────────────────────────────────────
+
+// Los datos fiscales solo se piden si hacen falta. A un particular que se
+// lleva dos empanadas no se le pide el NIF, y no se guarda lo que no se
+// necesita: del resto de encargos solo queda nombre y móvil.
+async function preguntarFactura(ctx: BotContext): Promise<void> {
+  const s = ctx.session.encargo;
+  ctx.session.step = 'idle';
+
+  // Si el cliente ya pidió factura otra vez, se reutilizan sus datos.
+  const guardados = s?.telefono ? encargos.buscarCliente(s.telefono)?.factura : undefined;
+  if (guardados) {
+    await ctx.reply(
+      `Este cliente ya tiene datos de factura guardados:\n${guardados.razonSocial} — ${guardados.nif}`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🧾 Sí, con factura', 'enc_fac_misma')],
+        [Markup.button.callback('Sin factura esta vez', 'enc_fac_no')],
+      ])
+    );
+    return;
+  }
+
+  await ctx.reply(
+    '¿Necesita factura? Solo si es empresa o autónomo.',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('🧾 Sí, es empresa o autónomo', 'enc_fac_si')],
+      [Markup.button.callback('No', 'enc_fac_no')],
+    ])
+  );
+}
+
+export async function handleEncargoFacturaNo(ctx: BotContext): Promise<void> {
+  if (!esStaff(ctx)) return;
+  const s = ctx.session.encargo;
+  if (s) { delete s.nif; delete s.razonSocial; }
   await confirmar(ctx);
+}
+
+export async function handleEncargoFacturaSi(ctx: BotContext): Promise<void> {
+  if (!esStaff(ctx)) return;
+  ctx.session.step = 'enc_awaiting_nif';
+  await ctx.reply('NIF o CIF de la empresa (por ejemplo B12345678).');
+}
+
+export async function handleEncargoFacturaMisma(ctx: BotContext): Promise<void> {
+  if (!esStaff(ctx)) return;
+  const s = ctx.session.encargo;
+  const guardados = s?.telefono ? encargos.buscarCliente(s.telefono)?.factura : undefined;
+  if (!s || !guardados) return;
+  s.nif = guardados.nif;
+  s.razonSocial = guardados.razonSocial;
+  await confirmar(ctx);
+}
+
+// NIF/CIF español: 8 dígitos + letra, letra + 7 dígitos + dígito o letra
+// (sociedades), o NIE (X/Y/Z + 7 dígitos + letra).
+function esNifValido(v: string): boolean {
+  const t = v.replace(/[\s-]/g, '').toUpperCase();
+  return /^\d{8}[A-Z]$/.test(t) || /^[A-HJNPQRSUVW]\d{7}[0-9A-J]$/.test(t) || /^[XYZ]\d{7}[A-Z]$/.test(t);
 }
 
 export async function handleEncargoGuardar(ctx: BotContext): Promise<void> {
@@ -289,6 +354,7 @@ export async function handleEncargoGuardar(ctx: BotContext): Promise<void> {
     nombre: s.nombre,
     lineas: s.lineas,
     ...(s.notaRecogida ? { notaRecogida: s.notaRecogida } : {}),
+    ...(s.nif && s.razonSocial ? { factura: { nif: s.nif, razonSocial: s.razonSocial } } : {}),
     creadoPor: String(ctx.from?.id ?? ''),
   });
   delete ctx.session.encargo;
@@ -331,6 +397,20 @@ export async function handleEncargoCancelar(ctx: BotContext, id: string): Promis
   await ctx.reply(e
     ? `✅ Encargo ${id} cancelado. Ya no cuenta para la producción del ${formatDateSpanish(e.fecha)}.`
     : `No he encontrado el encargo ${id} (o ya estaba cancelado).`);
+}
+
+// ── Resumen para la hoja ──────────────────────────────────────────────────────
+
+// No escribe en la hoja: saca el resumen para copiarlo. Las cantidades van
+// separadas por tabulador, así que al pegarlas se reparten en columnas solas.
+export async function handleEncargosResumen(ctx: BotContext, desde: string, hasta: string): Promise<void> {
+  if (!esStaff(ctx)) return;
+  const r = encargos.resumenEncargos(desde, hasta);
+  if (!r.recurrentes.encargos && !r.dePaso.encargos) {
+    await ctx.reply(`No hay encargos entre ${formatDateSpanish(desde)} y ${formatDateSpanish(hasta)}.`);
+    return;
+  }
+  await ctx.reply(encargos.textoResumen(r));
 }
 
 // ── Texto libre ───────────────────────────────────────────────────────────────
@@ -390,6 +470,23 @@ export async function handleEncargoText(ctx: BotContext): Promise<boolean> {
 
   if (paso === 'enc_awaiting_recogida') {
     s.notaRecogida = texto;
+    await preguntarFactura(ctx);
+    return true;
+  }
+
+  if (paso === 'enc_awaiting_nif') {
+    if (!esNifValido(texto)) {
+      await ctx.reply('Ese NIF/CIF no parece válido. Ejemplos: B12345678, 12345678Z, X1234567L.');
+      return true;
+    }
+    s.nif = texto.replace(/[\s-]/g, '').toUpperCase();
+    ctx.session.step = 'enc_awaiting_razon';
+    await ctx.reply('Razón social, tal y como tiene que salir en la factura.');
+    return true;
+  }
+
+  if (paso === 'enc_awaiting_razon') {
+    s.razonSocial = texto;
     await confirmar(ctx);
     return true;
   }

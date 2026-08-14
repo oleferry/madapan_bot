@@ -68,6 +68,10 @@ import {
   handleEncargoDescartar,
   handleEncargosDelDia,
   handleEncargoCancelar,
+  handleEncargosResumen,
+  handleEncargoFacturaSi,
+  handleEncargoFacturaNo,
+  handleEncargoFacturaMisma,
   handleEncargoText,
 } from './encargoFlow';
 import {
@@ -214,6 +218,28 @@ export function createBot(): Telegraf<BotContext> {
     await handleEncargosDelDia(ctx, fecha);
   });
 
+  // Resumen de encargos para pasarlo a la hoja. Separa clientes recurrentes
+  // de clientes de paso. NO escribe en la hoja: solo saca el texto.
+  // Sin argumentos, los próximos 7 días; admite una fecha o un rango.
+  bot.command('encargos_resumen', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const partes = ctx.message.text.trim().split(/\s+/).slice(1);
+    const { getTodayDate } = await import('../utils/dates');
+    const fecha = /^\d{4}-\d{2}-\d{2}$/;
+    const desde = partes[0] && fecha.test(partes[0]) ? partes[0] : getTodayDate();
+    let hasta = partes[1] && fecha.test(partes[1]) ? partes[1] : undefined;
+    if (!hasta) {
+      if (partes[0] && fecha.test(partes[0])) {
+        hasta = desde;                       // una sola fecha = ese día
+      } else {
+        const d = new Date(`${desde}T12:00:00`);
+        d.setDate(d.getDate() + 6);          // sin argumentos = próximos 7 días
+        hasta = d.toISOString().slice(0, 10);
+      }
+    }
+    await handleEncargosResumen(ctx, desde, hasta);
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -302,6 +328,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Ver los encargos de un día (staff)' },
+    { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
   ];
 
   // Comandos públicos → visibles para todos los usuarios (scope por defecto)
@@ -704,6 +731,18 @@ export function createBot(): Telegraf<BotContext> {
       }
       if (data === 'enc_rec_no') {
         await handleEncargoRecogidaNo(ctx);
+        return;
+      }
+      if (data === 'enc_fac_si') {
+        await handleEncargoFacturaSi(ctx);
+        return;
+      }
+      if (data === 'enc_fac_no') {
+        await handleEncargoFacturaNo(ctx);
+        return;
+      }
+      if (data === 'enc_fac_misma') {
+        await handleEncargoFacturaMisma(ctx);
         return;
       }
       if (data === 'enc_ok') {
