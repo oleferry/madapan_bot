@@ -390,20 +390,50 @@ export async function handleEncargoDescartar(ctx: BotContext): Promise<void> {
 
 // ── Ver y cancelar los del día ────────────────────────────────────────────────
 
-export async function handleEncargosDelDia(ctx: BotContext, fecha: string): Promise<void> {
+// Tres días de golpe, como el grupo de WhatsApp: hoy y los dos siguientes.
+// Es lo que se mira de una pasada por la mañana.
+export function tresDiasDesde(fecha: string): string[] {
+  const base = new Date(`${fecha}T12:00:00`);
+  return [0, 1, 2].map(i => {
+    const d = new Date(base);
+    d.setDate(d.getDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+}
+
+export async function handleEncargosDelDia(ctx: BotContext, fecha: string, dias = 3): Promise<void> {
   if (!esStaff(ctx)) return;
-  const lista = encargos.encargosDelDia(fecha);
-  if (!lista.length) {
-    await ctx.reply(`No hay encargos para el ${formatDateSpanish(fecha)}.`);
-    return;
+  const fechas = dias === 1 ? [fecha] : tresDiasDesde(fecha).slice(0, dias);
+  let alguno = false;
+
+  for (const f of fechas) {
+    const lista = encargos.encargosDelDia(f);
+    if (!lista.length) {
+      await ctx.reply(`— ${formatDateSpanish(f)} —\nSin encargos.`);
+      continue;
+    }
+    alguno = true;
+    await ctx.reply(`— ${formatDateSpanish(f)} — ${lista.length} encargo(s)`);
+    for (const e of lista) {
+      let txt = `${e.id} — ${e.nombre} (${e.telefono})\n`;
+      for (const l of e.lineas) txt += `  ${l.cantidad} × ${l.producto}${l.nota ? ` — ${l.nota}` : ''}\n`;
+      if (e.notaRecogida) txt += `Recogida: ${e.notaRecogida}\n`;
+      if (e.factura) txt += `🧾 Factura: ${e.factura.razonSocial} — ${e.factura.nif}\n`;
+      await ctx.reply(txt, Markup.inlineKeyboard([
+        [Markup.button.callback('✖️ Cancelar este encargo', `enc_cancel|${e.id}`)],
+      ]));
+    }
+    // Totales del día, que es lo que se lleva el obrador.
+    const totales = encargos.totalesDelDia(f);
+    if (totales.length > 1) {
+      let t = `Total del ${formatDateSpanish(f)}:\n`;
+      for (const p of totales) t += `  ${p.cantidad} × ${p.producto}\n`;
+      await ctx.reply(t);
+    }
   }
-  for (const e of lista) {
-    let txt = `${e.id} — ${e.nombre} (${e.telefono})\n`;
-    for (const l of e.lineas) txt += `  ${l.cantidad} × ${l.producto}${l.nota ? ` — ${l.nota}` : ''}\n`;
-    if (e.notaRecogida) txt += `Recogida: ${e.notaRecogida}\n`;
-    await ctx.reply(txt, Markup.inlineKeyboard([
-      [Markup.button.callback('✖️ Cancelar este encargo', `enc_cancel|${e.id}`)],
-    ]));
+
+  if (!alguno) {
+    await ctx.reply('No hay ningún encargo en esos tres días. Se apuntan con /encargo.');
   }
 }
 

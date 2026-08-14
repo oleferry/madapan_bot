@@ -217,13 +217,18 @@ export function createBot(): Telegraf<BotContext> {
     await handleEncargoStart(ctx);
   });
 
-  // Encargos de un día. Sin fecha, los de hoy; admite YYYY-MM-DD.
+  // Encargos de tres días: el de partida y los dos siguientes, como en el
+  // grupo de WhatsApp. Sin fecha, desde hoy. Con "1" al final, solo ese día.
+  //   /encargos                → hoy y los dos siguientes
+  //   /encargos 2026-08-16     → ese día y los dos siguientes
+  //   /encargos 2026-08-16 1   → solo ese día
   bot.command('encargos', async (ctx) => {
     if (!isStaff(ctx)) return;
-    const arg = ctx.message.text.trim().split(/\s+/)[1];
+    const partes = ctx.message.text.trim().split(/\s+/).slice(1);
     const { getTodayDate } = await import('../utils/dates');
-    const fecha = arg && /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : getTodayDate();
-    await handleEncargosDelDia(ctx, fecha);
+    const fecha = partes[0] && /^\d{4}-\d{2}-\d{2}$/.test(partes[0]) ? partes[0] : getTodayDate();
+    const dias = partes.includes('1') ? 1 : 3;
+    await handleEncargosDelDia(ctx, fecha, dias);
   });
 
   // Resumen de encargos para pasarlo a la hoja. Separa clientes recurrentes
@@ -352,7 +357,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
     { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
-    { command: 'encargos', description: 'Ver los encargos de un día (staff)' },
+    { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
     { command: 'probar_smtp', description: 'Probar el envío de correo a Holded (staff)' },
   ];
