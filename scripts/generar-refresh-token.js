@@ -12,7 +12,9 @@
  */
 require('dotenv').config();
 const http = require('http');
-const { OAuth2Client } = require('google-auth-library');
+// Del propio paquete de Drive: google-auth-library instalada aparte dejaba
+// dos copias con tipos incompatibles y se quitó del proyecto.
+const { auth } = require('@googleapis/drive');
 
 const PUERTO = 53682;
 const REDIRECT = `http://localhost:${PUERTO}`;
@@ -32,7 +34,7 @@ if (!clientId || !clientSecret) {
   process.exit(1);
 }
 
-const cliente = new OAuth2Client(clientId, clientSecret, REDIRECT);
+const cliente = new auth.OAuth2(clientId, clientSecret, REDIRECT);
 
 const url = cliente.generateAuthUrl({
   access_type: 'offline',
