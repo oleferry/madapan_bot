@@ -1,5 +1,7 @@
-import { drive_v3, drive } from '@googleapis/drive';
-import { OAuth2Client } from 'google-auth-library';
+// El cliente OAuth se coge del propio paquete de Drive (auth.OAuth2) y no de
+// google-auth-library suelto: instalarla aparte deja dos copias con tipos
+// incompatibles ("separate declarations of a private property").
+import { drive_v3, drive, auth } from '@googleapis/drive';
 import { Readable } from 'stream';
 import { config } from '../config';
 import { log } from '../utils/logger';
@@ -28,9 +30,9 @@ function getApi(): drive_v3.Drive {
       'Faltan credenciales de Drive (GOOGLE_OAUTH_CLIENT_ID / _SECRET / _REFRESH_TOKEN)'
     );
   }
-  const auth = new OAuth2Client(googleOauthClientId, googleOauthClientSecret);
-  auth.setCredentials({ refresh_token: googleOauthRefreshToken });
-  api = drive({ version: 'v3', auth });
+  const cliente = new auth.OAuth2(googleOauthClientId, googleOauthClientSecret);
+  cliente.setCredentials({ refresh_token: googleOauthRefreshToken });
+  api = drive({ version: 'v3', auth: cliente });
   return api;
 }
 
