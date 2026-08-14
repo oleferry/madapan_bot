@@ -46,8 +46,6 @@ const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
   },
   {
     nombre: '🧁 Repostería',
-    // "Tarta de limón" todavía no existe en Holded: se pide en el grupo pero
-    // no está dada de alta. Aquí vale por nombre porque esta fase no factura.
     productos: ['Donut’s pink', 'Dónuts glass', 'Pain au chocolat',
       'Panettone clásico', 'Panettone chocolate', 'Tarta de limón'],
   },
@@ -57,7 +55,7 @@ const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
     // cantidad que se apunta aquí son PIEZAS; el kilaje se ve al pesarla.
     productos: ['Empanada de atún y pisto', 'Empanada de bonito',
       'Empanada de bacon, queso y pimientos', 'Empanada de cecina',
-      'Empanada 100gr', 'Porción empanada 150 g'],
+      'Empanada completa', 'Empanada 100gr', 'Porción empanada 150 g'],
   },
   {
     nombre: '🍖 Asados',
