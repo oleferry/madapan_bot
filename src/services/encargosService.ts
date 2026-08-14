@@ -44,8 +44,7 @@ interface Almacen {
   encargos: Encargo[];
 }
 
-const RUTA = process.env['ENCARGOS_PATH']
-  ?? (config.pizzaStockPath ? path.join(path.dirname(config.pizzaStockPath), 'encargos.json') : 'data/encargos.json');
+const RUTA = process.env['ENCARGOS_PATH'] ?? config.encargosPath;
 
 let cache: Almacen | null = null;
 

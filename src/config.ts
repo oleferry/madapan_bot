@@ -48,6 +48,20 @@ export const config = {
   pizzaStockPath: process.env['PIZZA_STOCK_PATH'] ?? persistPath('pizza-stock.json', 'data/pizza-stock.json'),
   pizzaExtraDatesPath: process.env['PIZZA_EXTRA_DATES_PATH'] ?? persistPath('pizza-extra-dates.json', 'data/pizza-extra-dates.json'),
   waybillMapPath: process.env['WAYBILL_MAP_PATH'] ?? persistPath('waybill-map.json', 'data/waybill-map.json'),
+  encargosPath: process.env['ENCARGOS_PATH'] ?? persistPath('encargos.json', 'data/encargos.json'),
+  // Facturas de proveedor: extracción con Claude y archivo en Drive.
+  anthropicApiKey: process.env['ANTHROPIC_API_KEY'] ?? '',
+  // OAuth de usuario, no cuenta de servicio: una cuenta de servicio no puede
+  // escribir en "Mi unidad" de una cuenta Gmail normal (solo en unidades
+  // compartidas). Ver docs/credenciales-facturas.md.
+  googleOauthClientId: process.env['GOOGLE_OAUTH_CLIENT_ID'] ?? '',
+  googleOauthClientSecret: process.env['GOOGLE_OAUTH_CLIENT_SECRET'] ?? '',
+  googleOauthRefreshToken: process.env['GOOGLE_OAUTH_REFRESH_TOKEN'] ?? '',
+  // Carpeta .../Contabilidad/Facturas/Recibidas. Se fija por ID porque hay
+  // tres carpetas llamadas "Recibidas" en el Drive y buscarlas por nombre
+  // acierta la que no es.
+  driveFacturasFolderId: process.env['DRIVE_FACTURAS_FOLDER_ID'] ?? '',
+  driveAlbaranesFolderId: process.env['DRIVE_ALBARANES_FOLDER_ID'] ?? '',
 };
 
 export const isDryRun = config.dryRun;

@@ -50,6 +50,33 @@ import {
   handlePizzaCancelPrompt,
   handlePizzaCancelConfirm,
 } from './pizzaFlow';
+import {
+  handleEncargoStart,
+  handleEncargoDia,
+  handleEncargoCliente,
+  handleEncargoClienteNuevo,
+  handleEncargoCategoria,
+  handleEncargoCategorias,
+  handleEncargoProducto,
+  handleEncargoCantidad,
+  handleEncargoCantidadManual,
+  handleEncargoNotaNo,
+  handleEncargoMas,
+  handleEncargoFin,
+  handleEncargoRecogidaNo,
+  handleEncargoGuardar,
+  handleEncargoDescartar,
+  handleEncargosDelDia,
+  handleEncargoCancelar,
+  handleEncargoText,
+} from './encargoFlow';
+import {
+  handleFoto,
+  handleDocumento,
+  handleProcesar,
+  handleArchivar,
+  handleDescartar,
+} from './facturaFlow';
 import * as pizzaService from '../services/pizzaService';
 import { sendDailyWaybills } from '../jobs/dailyWaybillsJob';
 import { prepararCargaSemanal, confirmarCargaSemanal, cancelarCargaSemanal } from '../jobs/weeklyOrdersJob';
@@ -172,6 +199,21 @@ export function createBot(): Telegraf<BotContext> {
     }
   });
 
+  // Encargos sueltos (staff): lo que hoy se apunta a mano en el grupo de WhatsApp
+  bot.command('encargo', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleEncargoStart(ctx);
+  });
+
+  // Encargos de un día. Sin fecha, los de hoy; admite YYYY-MM-DD.
+  bot.command('encargos', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const arg = ctx.message.text.trim().split(/\s+/)[1];
+    const { getTodayDate } = await import('../utils/dates');
+    const fecha = arg && /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : getTodayDate();
+    await handleEncargosDelDia(ctx, fecha);
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -258,6 +300,8 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'pizzas_dia_extra_quitar', description: 'Quitar un día puntual de pizza (staff)' },
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
     { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
+    { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
+    { command: 'encargos', description: 'Ver los encargos de un día (staff)' },
   ];
 
   // Comandos públicos → visibles para todos los usuarios (scope por defecto)
@@ -602,6 +646,93 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
+      // Encargos y facturas son cosa del staff. Los handlers vuelven a
+      // comprobarlo, pero se corta aquí para no ejecutar nada de más.
+      if ((data.startsWith('enc_') || data.startsWith('fac_')) && !isStaff(ctx)) {
+        warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
+        return;
+      }
+
+      if (data.startsWith('enc_dia|')) {
+        await handleEncargoDia(ctx, data.split('|')[1]!);
+        return;
+      }
+      if (data.startsWith('enc_cli|')) {
+        await handleEncargoCliente(ctx, data.split('|')[1]!);
+        return;
+      }
+      if (data === 'enc_nuevo') {
+        await handleEncargoClienteNuevo(ctx);
+        return;
+      }
+      if (data === 'enc_nuevo_encargo') {
+        await handleEncargoStart(ctx);
+        return;
+      }
+      if (data === 'enc_cats') {
+        await handleEncargoCategorias(ctx);
+        return;
+      }
+      if (data.startsWith('enc_cat|')) {
+        await handleEncargoCategoria(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+      if (data.startsWith('enc_prod|')) {
+        const p = data.split('|');
+        await handleEncargoProducto(ctx, parseInt(p[1]!, 10), parseInt(p[2]!, 10));
+        return;
+      }
+      if (data === 'enc_cant_manual') {
+        await handleEncargoCantidadManual(ctx);
+        return;
+      }
+      if (data.startsWith('enc_cant|')) {
+        await handleEncargoCantidad(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+      if (data === 'enc_nota_no') {
+        await handleEncargoNotaNo(ctx);
+        return;
+      }
+      if (data === 'enc_mas') {
+        await handleEncargoMas(ctx);
+        return;
+      }
+      if (data === 'enc_fin') {
+        await handleEncargoFin(ctx);
+        return;
+      }
+      if (data === 'enc_rec_no') {
+        await handleEncargoRecogidaNo(ctx);
+        return;
+      }
+      if (data === 'enc_ok') {
+        await handleEncargoGuardar(ctx);
+        return;
+      }
+      if (data === 'enc_no') {
+        await handleEncargoDescartar(ctx);
+        return;
+      }
+      if (data.startsWith('enc_cancel|')) {
+        await handleEncargoCancelar(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // Facturas y albaranes de proveedor en papel
+      if (data === 'fac_procesar') {
+        await handleProcesar(ctx);
+        return;
+      }
+      if (data === 'fac_archivar') {
+        await handleArchivar(ctx);
+        return;
+      }
+      if (data === 'fac_descartar') {
+        await handleDescartar(ctx);
+        return;
+      }
+
       warn('TelegramBot', `Unhandled callback: ${data}`);
     } catch (err) {
       error('TelegramBot', `Callback error for "${data}": ${(err as Error).message}`);
@@ -615,9 +746,21 @@ export function createBot(): Telegraf<BotContext> {
 
   // ── Text messages ───────────────────────────────────────────────────────────
   bot.on('text', async (ctx) => {
+    if (await handleEncargoText(ctx)) return;
     const handledByPizza = await handlePizzaText(ctx);
     if (handledByPizza) return;
     await handleText(ctx);
+  });
+
+  // ── Fotos y PDFs: facturas y albaranes de proveedor en papel (staff) ────────
+  bot.on('photo', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleFoto(ctx);
+  });
+
+  bot.on('document', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleDocumento(ctx);
   });
 
   // ── Error handler ───────────────────────────────────────────────────────────

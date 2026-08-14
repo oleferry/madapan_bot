@@ -1,8 +1,21 @@
-# Encargos sueltos (clientes no habituales) — especificación
+# Encargos sueltos (clientes no habituales)
 
-Pendiente de implementar. Reutiliza casi todo el patrón del flujo de pizzas
-(`src/bot/pizzaFlow.ts` + `src/services/pizzaService.ts`): público, sin NIF,
-nombre + teléfono, aviso al staff y resumen para admin.
+**Fase 1 implementada.** `src/services/encargosService.ts` (almacén),
+`src/bot/encargoFlow.ts` (alta desde Telegram) y la suma a `/produccion`.
+
+## Cómo se usa hoy
+
+- `/encargo` — alta guiada, solo staff: día → cliente → producto → cantidad →
+  indicación para el obrador → más productos o terminar → nota de recogida →
+  confirmar.
+- `/encargos [YYYY-MM-DD]` — los encargos de un día, con botón para cancelar
+  cada uno. Sin fecha, los de hoy.
+- Los encargos aparecen automáticamente en `/produccion` del día, debajo de los
+  pedidos de Holded, con los totales por producto.
+
+El cliente se elige de la lista de habituales (los que más han encargado
+primero) o se da de alta con el móvil. Si el móvil ya existe, el bot lo
+reconoce y no duplica el cliente aunque esta vez lo llamen de otra forma.
 
 ## El problema real que sustituye
 
@@ -80,7 +93,7 @@ grupo, y "barras grandes" frente a barra normal.
 
 ## Fases (en este orden)
 
-1. **Encargo → resumen de producción.** Se guarda en el bot y aparece en
+1. ✅ **Encargo → resumen de producción.** Se guarda en el bot y aparece en
    `/produccion` junto a los pedidos de Holded. Sin tocar Holded. Es lo que
    de verdad hace falta a las 4:00 y lo más sencillo de las tres.
 2. **Revisión en barra.** Un admin ve los encargos del día y confirma o
