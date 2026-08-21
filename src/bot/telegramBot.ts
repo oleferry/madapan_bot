@@ -89,7 +89,6 @@ import {
 import {
   handleSobrasStart,
   handleSobrasDia,
-  handleSobrasCliente,
   handleSobrasCantidad,
   handleSobrasManual,
   handleSobrasFin,
@@ -314,7 +313,8 @@ export function createBot(): Telegraf<BotContext> {
   // Sobras por punto de entrega (staff)
   bot.command('sobras', async (ctx) => {
     if (!isStaff(ctx)) return;
-    await handleSobrasStart(ctx);
+    const arg = ctx.message.text.trim().split(/\s+/)[1];
+    await handleSobrasStart(ctx, arg && /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : undefined);
   });
 
   // Producción sugerida para un punto: lo entregado menos lo que sobra.
@@ -442,8 +442,8 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
-    { command: 'sobras', description: 'Anotar lo que ha sobrado en un punto (staff)' },
-    { command: 'ajuste', description: 'Produccion sugerida de un punto (staff)' },
+    { command: 'sobras', description: 'Anotar lo que ha sobrado en la tienda (staff)' },
+    { command: 'ajuste', description: 'Produccion sugerida de la tienda (staff)' },
     { command: 'apuntar', description: 'Apuntar algo para pedir (staff)' },
     { command: 'compras', description: 'Ver y enviar los pedidos a proveedor (staff)' },
     { command: 'probar_smtp', description: 'Probar el envío de correo a Holded (staff)' },
@@ -882,10 +882,6 @@ export function createBot(): Telegraf<BotContext> {
       }
       if (data.startsWith('sb_dia|')) {
         await handleSobrasDia(ctx, data.split('|')[1]!);
-        return;
-      }
-      if (data.startsWith('sb_cli|')) {
-        await handleSobrasCliente(ctx, parseInt(data.split('|')[1]!, 10));
         return;
       }
       if (data.startsWith('sb_cant|')) {

@@ -7,11 +7,20 @@ import { formatDateSpanish, getTodayDate } from '../utils/dates';
 import { config } from '../config';
 import { log } from '../utils/logger';
 
-// Anotar lo que sobra en cada punto. Sustituye al recuento por WhatsApp.
+// Anotar lo que sobra en la tienda de Madapan. Sustituye al recuento por
+// WhatsApp.
+//
+// Solo la tienda: en los puntos de reparto la devolución ya se mete en el
+// albarán, así que lo entregado en Holded ya viene neto y no hay nada que
+// anotar aparte. Contarlo dos veces daría un ajuste falso.
 //
 // La clave para que se use de verdad: no hacer escribir. El bot ya sabe lo que
-// se entregó ese día (está en el albarán), así que enseña esos productos uno a
-// uno y solo hay que tocar la cantidad. Lo que no se toca, se da por vendido.
+// salió ese día (está en el albarán de Madapan), así que enseña esos productos
+// uno a uno y solo hay que tocar la cantidad. Lo que no se toca, se da por
+// vendido.
+
+// Nombre del punto propio tal y como está en Holded.
+const TIENDA = process.env['PUNTO_PROPIO'] ?? 'Madapan';
 
 export interface SobraSessionData {
   fecha?: string;
@@ -19,70 +28,51 @@ export interface SobraSessionData {
   entregado?: Array<{ producto: string; sku: string; units: number }>;
   lineas: sobras.SobraLinea[];
   idx?: number;                  // producto por el que va
-  clientes?: string[];
 }
 
 function esStaff(ctx: BotContext): boolean {
   return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
 }
 
-function ayer(): string {
-  const d = new Date(`${getTodayDate()}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-export async function handleSobrasStart(ctx: BotContext): Promise<void> {
+// Las sobras se cuentan y se comunican el mismo día, así que no se pregunta la
+// fecha: se entra directo a lo de hoy. El comando admite una fecha suelta
+// (/sobras 2026-08-20) por si algún día hay que corregir a posteriori.
+export async function handleSobrasStart(ctx: BotContext, fecha?: string): Promise<void> {
   if (!esStaff(ctx)) return;
   ctx.session.sobra = { lineas: [] };
   ctx.session.step = 'idle';
-  await ctx.reply('🥖 Anotar sobras\n\n¿De qué día?', Markup.inlineKeyboard([
-    [Markup.button.callback(`Hoy — ${formatDateSpanish(getTodayDate())}`, `sb_dia|${getTodayDate()}`)],
-    [Markup.button.callback(`Ayer — ${formatDateSpanish(ayer())}`, `sb_dia|${ayer()}`)],
-  ]));
+  await handleSobrasDia(ctx, fecha ?? getTodayDate());
 }
 
 export async function handleSobrasDia(ctx: BotContext, fecha: string): Promise<void> {
   if (!esStaff(ctx)) return;
   const s = (ctx.session.sobra ??= { lineas: [] });
   s.fecha = fecha;
+  s.cliente = TIENDA;
 
   const entregas = await historico.cargar();
-  // Los puntos a los que se entregó ESE día. Si el histórico todavía no lo
-  // tiene, se cae a los habituales para no dejar al staff colgado.
-  const deEseDia = [...new Set(entregas.filter(e => e.fecha === fecha).map(e => e.cliente))];
-  const lista = deEseDia.length
-    ? deEseDia
-    : historico.clientes(entregas).slice(0, 12).map(c => c.cliente);
-
-  s.clientes = lista;
-  if (!lista.length) {
-    await ctx.reply('No tengo entregas de ese día. Actualiza el histórico con /historico_refrescar.');
-    return;
-  }
-  await ctx.reply(
-    `${formatDateSpanish(fecha)} — ¿qué punto?`,
-    Markup.inlineKeyboard(lista.map((c, i) => [Markup.button.callback(c.slice(0, 60), `sb_cli|${i}`)]))
-  );
-}
-
-export async function handleSobrasCliente(ctx: BotContext, idx: number): Promise<void> {
-  if (!esStaff(ctx)) return;
-  const s = ctx.session.sobra;
-  const cliente = s?.clientes?.[idx];
-  if (!s || !cliente || !s.fecha) return;
-  s.cliente = cliente;
-
-  const entregas = await historico.cargar();
-  const suya = entregas.find(e => e.cliente === cliente && e.fecha === s.fecha);
+  const suya = entregas.find(e => e.cliente === TIENDA && e.fecha === fecha);
   s.entregado = (suya?.lineas ?? []).map(l => ({ producto: l.name, sku: l.sku, units: l.units }));
+
+  if (s.entregado.length) {
+    await ctx.reply(
+      `🥖 Sobras de ${TIENDA} — ${formatDateSpanish(fecha)}
+` +
+      `${s.entregado.length} productos. Ve marcando lo que ha sobrado.`
+    );
+  }
 
   if (!s.entregado.length) {
     await ctx.reply(
-      'No tengo el detalle de esa entrega. Actualiza el histórico con /historico_refrescar y vuelve a intentarlo.'
+      `No tengo lo que salió a ${TIENDA} el ${formatDateSpanish(fecha)}. ` +
+      'Si el albarán es de hoy, puede que aún no esté descargado: prueba /historico_refrescar.'
     );
     return;
   }
+  await ctx.reply(
+    `🥖 Sobras de ${TIENDA} — ${formatDateSpanish(fecha)}\n` +
+    `${s.entregado.length} productos. Ve marcando lo que ha sobrado.`
+  );
   s.idx = 0;
   await preguntarProducto(ctx);
 }
@@ -155,7 +145,7 @@ async function confirmar(ctx: BotContext): Promise<void> {
   delete ctx.session.sobra;
   log('SobraFlow', `Sobras de ${cliente} ${s.fecha} por ${ctx.from?.id}`);
   await ctx.reply(txt, Markup.inlineKeyboard([
-    [Markup.button.callback('🥖 Otro punto', 'sb_otro')],
+    [Markup.button.callback('📊 Ver producción sugerida', `sb_aj|0|${new Date().getDay()}`)],
   ]));
 }
 
@@ -185,12 +175,10 @@ export async function handleAjuste(ctx: BotContext, consulta: string, dow: numbe
   await ctx.reply(sobras.textoSugerencia(cliente, dow, sobras.sugerirParaDia(entregas, cliente, dow)));
 }
 
-export async function handleAjusteBoton(ctx: BotContext, idx: number, dow: number): Promise<void> {
+export async function handleAjusteBoton(ctx: BotContext, _idx: number, dow: number): Promise<void> {
   if (!esStaff(ctx)) return;
   const entregas = await historico.cargar();
-  const cliente = historico.clientes(entregas)[idx]?.cliente;
-  if (!cliente) return;
-  await ctx.reply(sobras.textoSugerencia(cliente, dow, sobras.sugerirParaDia(entregas, cliente, dow)));
+  await ctx.reply(sobras.textoSugerencia(TIENDA, dow, sobras.sugerirParaDia(entregas, TIENDA, dow)));
 }
 
 // ── Texto libre ───────────────────────────────────────────────────────────────
