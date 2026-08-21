@@ -103,6 +103,12 @@ import {
   handleSobraText,
 } from './sobraFlow';
 import {
+  handleCambiosStart,
+  handleAplicar,
+  handleCancelar,
+  handleInstruccionText,
+} from './instruccionFlow';
+import {
   handleFoto,
   handleDocumento,
   handleProcesar,
@@ -359,6 +365,13 @@ export function createBot(): Telegraf<BotContext> {
     }
   });
 
+  // Cambios en los pedidos semanales a partir de un mensaje escrito a mano.
+  // Propone y espera confirmación: no escribe en la hoja por su cuenta.
+  bot.command('cambios', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleCambiosStart(ctx, ctx.message.text.replace(/^\/cambios(@\S+)?/, '').trim());
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -448,6 +461,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
+    { command: 'cambios', description: 'Aplicar cambios de pedidos desde un mensaje (staff)' },
     { command: 'sobras', description: 'Anotar lo que ha sobrado en la tienda (staff)' },
     { command: 'ajuste', description: 'Produccion sugerida de la tienda (staff)' },
     { command: 'apuntar', description: 'Apuntar algo para pedir (staff)' },
@@ -894,6 +908,19 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
+      if (data.startsWith('ins_') && !isStaff(ctx)) {
+        warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
+        return;
+      }
+      if (data === 'ins_aplicar') {
+        await handleAplicar(ctx);
+        return;
+      }
+      if (data === 'ins_no') {
+        await handleCancelar(ctx);
+        return;
+      }
+
       if (data.startsWith('sb_') && !isStaff(ctx)) {
         warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
         return;
@@ -992,6 +1019,7 @@ export function createBot(): Telegraf<BotContext> {
 
   // ── Text messages ───────────────────────────────────────────────────────────
   bot.on('text', async (ctx) => {
+    if (await handleInstruccionText(ctx)) return;
     if (await handleSobraText(ctx)) return;
     if (await handleCompraText(ctx)) return;
     if (await handleEncargoText(ctx)) return;

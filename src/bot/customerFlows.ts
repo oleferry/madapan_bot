@@ -33,13 +33,15 @@ export interface SessionData {
     | 'enc_awaiting_razon'
     | 'cmp_awaiting_prov'
     | 'sb_awaiting_cantidad'
-    | 'sb_awaiting_producto';
+    | 'sb_awaiting_producto'
+    | 'ins_awaiting_texto';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   encargo?: import('./encargoFlow').EncargoSessionData;
   factura?: import('./facturaFlow').FacturaSessionData;
   compra?: import('./compraFlow').CompraSessionData;
   sobra?: import('./sobraFlow').SobraSessionData;
+  instruccion?: import('./instruccionFlow').InstruccionSessionData;
   selectedDate?: string;
   selectedOrderId?: string;
   selectedLineId?: string;

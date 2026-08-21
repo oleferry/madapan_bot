@@ -62,3 +62,17 @@ export async function writeCell(range: string, value: string): Promise<void> {
   });
   log('SheetsClient', `Escrito ${range} = ${value}`);
 }
+
+// Escritura en bloque: una sola llamada para muchas celdas sueltas. Aplicar
+// 40 cambios con writeCell() sería 40 llamadas y la hoja tarda lo suyo.
+export async function writeCells(updates: Array<{ range: string; value: string }>): Promise<void> {
+  if (!updates.length) return;
+  await getSheets().spreadsheets.values.batchUpdate({
+    spreadsheetId: config.masterSheetId,
+    requestBody: {
+      valueInputOption: 'USER_ENTERED',
+      data: updates.map(u => ({ range: u.range, values: [[u.value]] })),
+    },
+  });
+  log('SheetsClient', `Escritas ${updates.length} celdas`);
+}
