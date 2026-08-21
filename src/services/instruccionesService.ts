@@ -105,6 +105,9 @@ export interface Plan {
   cambios: ps.Cambio[];
   dudas: string[];
   avisos: string[];
+  // Filas que vienen de una orden marcada como temporal, con el texto que la
+  // pidió. Sirven para recordar después que hay que deshacerlas.
+  temporales: Array<{ fila: number; descripcion: string }>;
 }
 
 // Convierte las operaciones en cambios concretos. Nada que no se pueda resolver
@@ -114,6 +117,7 @@ export async function construirPlan(ops: Operacion[], filas: ps.FilaPedido[]): P
   const cambios: ps.Cambio[] = [];
   const dudas: string[] = [];
   const avisos: string[] = [];
+  const temporales: Array<{ fila: number; descripcion: string }> = [];
 
   for (const op of ops) {
     const puntos = ps.buscarPunto(filas, op.punto);
@@ -142,6 +146,7 @@ export async function construirPlan(ops: Operacion[], filas: ps.FilaPedido[]): P
       for (const f of suyas.filter(enDia)) {
         if (f.cantidad === 0) continue;
         cambios.push({ ...f, actual: f.cantidad, nuevo: 0, motivo: 'cerrado' });
+        if (op.temporal) temporales.push({ fila: f.fila, descripcion: op.literal });
       }
       continue;
     }
@@ -177,6 +182,7 @@ export async function construirPlan(ops: Operacion[], filas: ps.FilaPedido[]): P
           ...f, actual: f.cantidad, nuevo: objetivo,
           motivo: op.tipo === 'quitar' ? 'ya no lo llevan' : 'cantidad nueva',
         });
+        if (op.temporal) temporales.push({ fila: f.fila, descripcion: op.literal });
       }
       // Que no salga en la lista de cambios no significa que se haya ignorado:
       // puede que ya estuviera así. Mejor decirlo que dejar la duda.
@@ -212,6 +218,7 @@ export async function construirPlan(ops: Operacion[], filas: ps.FilaPedido[]): P
             ...f, actual: f.cantidad, nuevo,
             motivo: `media de ${m.dias} ${d}s antes de agosto`,
           });
+          if (op.temporal) temporales.push({ fila: f.fila, descripcion: op.literal });
           algo = true;
         }
       }
@@ -221,7 +228,12 @@ export async function construirPlan(ops: Operacion[], filas: ps.FilaPedido[]): P
     }
   }
 
-  return { cambios: deduplicar(cambios), dudas, avisos };
+  const finales = deduplicar(cambios);
+  const filasFinales = new Set(finales.map(c => c.fila));
+  return {
+    cambios: finales, dudas, avisos,
+    temporales: temporales.filter(t => filasFinales.has(t.fila)),
+  };
 }
 
 // Una misma celda puede recibir dos cambios: "Villacarralón a 4 panes" y "no

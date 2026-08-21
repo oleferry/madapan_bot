@@ -107,6 +107,9 @@ import {
   handleAplicar,
   handleCancelar,
   handleInstruccionText,
+  handleRevertir,
+  handleNoRevertir,
+  handlePendientes,
 } from './instruccionFlow';
 import {
   handleFoto,
@@ -372,6 +375,12 @@ export function createBot(): Telegraf<BotContext> {
     await handleCambiosStart(ctx, ctx.message.text.replace(/^\/cambios(@\S+)?/, '').trim());
   });
 
+  // Cambios temporales que siguen puestos y habría que deshacer.
+  bot.command('pendientes', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handlePendientes(ctx);
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -461,6 +470,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
+    { command: 'pendientes', description: 'Cambios temporales sin deshacer (staff)' },
     { command: 'cambios', description: 'Aplicar cambios de pedidos desde un mensaje (staff)' },
     { command: 'sobras', description: 'Anotar lo que ha sobrado en la tienda (staff)' },
     { command: 'ajuste', description: 'Produccion sugerida de la tienda (staff)' },
@@ -912,6 +922,19 @@ export function createBot(): Telegraf<BotContext> {
         warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
         return;
       }
+      if (data.startsWith('rev_') && !isStaff(ctx)) {
+        warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
+        return;
+      }
+      if (data.startsWith('rev_si|')) {
+        await handleRevertir(ctx, data.split('|')[1]!);
+        return;
+      }
+      if (data.startsWith('rev_no|')) {
+        await handleNoRevertir(ctx, data.split('|')[1]!);
+        return;
+      }
+
       if (data === 'ins_aplicar') {
         await handleAplicar(ctx);
         return;
