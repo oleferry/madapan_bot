@@ -36,7 +36,7 @@ function getInvoicingClient(): AxiosInstance {
 }
 
 // v1 API — único que soporta actualizar líneas de documentos
-function getInvoicingV1Client(): AxiosInstance {
+export function getInvoicingV1Client(): AxiosInstance {
   if (!invoicingV1Client) {
     invoicingV1Client = axios.create({
       baseURL: config.holdedApiV1Url,

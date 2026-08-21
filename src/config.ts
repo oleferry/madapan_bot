@@ -49,6 +49,8 @@ export const config = {
   pizzaExtraDatesPath: process.env['PIZZA_EXTRA_DATES_PATH'] ?? persistPath('pizza-extra-dates.json', 'data/pizza-extra-dates.json'),
   waybillMapPath: process.env['WAYBILL_MAP_PATH'] ?? persistPath('waybill-map.json', 'data/waybill-map.json'),
   encargosPath: process.env['ENCARGOS_PATH'] ?? persistPath('encargos.json', 'data/encargos.json'),
+  historicoPath: process.env['HISTORICO_PATH'] ?? persistPath('historico-ventas.json', 'data/historico-ventas.json'),
+  sobrasPath: process.env['SOBRAS_PATH'] ?? persistPath('sobras.json', 'data/sobras.json'),
   comprasPath: process.env['COMPRAS_PATH'] ?? persistPath('compras.json', 'data/compras.json'),
   // Día de la semana del borrador de pedidos a proveedor (3 = miércoles).
   // El borrador es quincenal; el job mira si han pasado 13 días.

@@ -31,12 +31,14 @@ export interface SessionData {
     | 'enc_awaiting_recogida'
     | 'enc_awaiting_nif'
     | 'enc_awaiting_razon'
-    | 'cmp_awaiting_prov';
+    | 'cmp_awaiting_prov'
+    | 'sb_awaiting_cantidad';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   encargo?: import('./encargoFlow').EncargoSessionData;
   factura?: import('./facturaFlow').FacturaSessionData;
   compra?: import('./compraFlow').CompraSessionData;
+  sobra?: import('./sobraFlow').SobraSessionData;
   selectedDate?: string;
   selectedOrderId?: string;
   selectedLineId?: string;

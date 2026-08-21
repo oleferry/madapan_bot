@@ -87,6 +87,17 @@ import {
   handleCompraText,
 } from './compraFlow';
 import {
+  handleSobrasStart,
+  handleSobrasDia,
+  handleSobrasCliente,
+  handleSobrasCantidad,
+  handleSobrasManual,
+  handleSobrasFin,
+  handleAjuste,
+  handleAjusteBoton,
+  handleSobraText,
+} from './sobraFlow';
+import {
   handleFoto,
   handleDocumento,
   handleProcesar,
@@ -300,6 +311,48 @@ export function createBot(): Telegraf<BotContext> {
     await handleBorrador(ctx);
   });
 
+  // Sobras por punto de entrega (staff)
+  bot.command('sobras', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleSobrasStart(ctx);
+  });
+
+  // Producción sugerida para un punto: lo entregado menos lo que sobra.
+  //   /ajuste arco            → para el día de la semana de mañana
+  //   /ajuste arco sabado     → para ese día
+  bot.command('ajuste', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const resto = ctx.message.text.replace(/^\/ajuste(@\S+)?/, '').trim();
+    const DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+    const sinTilde = (t: string): string => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const palabras = resto.split(/\s+/).filter(Boolean);
+    const ultima = palabras.length ? sinTilde(palabras[palabras.length - 1]) : '';
+    const idxDia = DIAS.indexOf(ultima);
+    // Sin día, el de mañana: es para lo que se produce esta noche.
+    const dow = idxDia >= 0 ? idxDia : (new Date().getDay() + 1) % 7;
+    const consulta = idxDia >= 0 ? palabras.slice(0, -1).join(' ') : resto;
+    await handleAjuste(ctx, consulta, dow);
+  });
+
+  // Vuelve a bajar los albaranes de Holded (el histórico se cachea en disco).
+  bot.command('historico_refrescar', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await ctx.reply('Descargando albaranes de Holded...');
+    try {
+      const historico = await import('../services/historicoVentas');
+      const e = await historico.cargar(true);
+      const fechas = e.map(x => x.fecha).sort();
+      await ctx.reply(
+        `✅ ${e.length} albaranes (${fechas[0]} → ${fechas[fechas.length - 1]})
+` +
+        `${historico.clientes(e).length} puntos de entrega.`
+      );
+    } catch (err) {
+      error('TelegramBot', `/historico_refrescar failed: ${(err as Error).message}`);
+      await ctx.reply(`Error: ${(err as Error).message}`);
+    }
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -389,6 +442,8 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
+    { command: 'sobras', description: 'Anotar lo que ha sobrado en un punto (staff)' },
+    { command: 'ajuste', description: 'Produccion sugerida de un punto (staff)' },
     { command: 'apuntar', description: 'Apuntar algo para pedir (staff)' },
     { command: 'compras', description: 'Ver y enviar los pedidos a proveedor (staff)' },
     { command: 'probar_smtp', description: 'Probar el envío de correo a Holded (staff)' },
@@ -821,6 +876,40 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
+      if (data.startsWith('sb_') && !isStaff(ctx)) {
+        warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
+        return;
+      }
+      if (data.startsWith('sb_dia|')) {
+        await handleSobrasDia(ctx, data.split('|')[1]!);
+        return;
+      }
+      if (data.startsWith('sb_cli|')) {
+        await handleSobrasCliente(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+      if (data.startsWith('sb_cant|')) {
+        await handleSobrasCantidad(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+      if (data === 'sb_manual') {
+        await handleSobrasManual(ctx);
+        return;
+      }
+      if (data === 'sb_fin') {
+        await handleSobrasFin(ctx);
+        return;
+      }
+      if (data === 'sb_otro') {
+        await handleSobrasStart(ctx);
+        return;
+      }
+      if (data.startsWith('sb_aj|')) {
+        const p = data.split('|');
+        await handleAjusteBoton(ctx, parseInt(p[1]!, 10), parseInt(p[2]!, 10));
+        return;
+      }
+
       if (data.startsWith('cmp_') && !isStaff(ctx)) {
         warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
         return;
@@ -881,6 +970,7 @@ export function createBot(): Telegraf<BotContext> {
 
   // ── Text messages ───────────────────────────────────────────────────────────
   bot.on('text', async (ctx) => {
+    if (await handleSobraText(ctx)) return;
     if (await handleCompraText(ctx)) return;
     if (await handleEncargoText(ctx)) return;
     const handledByPizza = await handlePizzaText(ctx);
