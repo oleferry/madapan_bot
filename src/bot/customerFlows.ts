@@ -32,7 +32,8 @@ export interface SessionData {
     | 'enc_awaiting_nif'
     | 'enc_awaiting_razon'
     | 'cmp_awaiting_prov'
-    | 'sb_awaiting_cantidad';
+    | 'sb_awaiting_cantidad'
+    | 'sb_awaiting_producto';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   encargo?: import('./encargoFlow').EncargoSessionData;

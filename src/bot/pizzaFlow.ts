@@ -2,6 +2,7 @@ import { Markup } from 'telegraf';
 import { Message } from 'telegraf/types';
 import { BotContext } from './customerFlows';
 import * as pizzaService from '../services/pizzaService';
+import * as pagos from '../services/pagosService';
 import { sendToAdmin, sendToAllStaff } from '../services/notifier';
 import { log, warn } from '../utils/logger';
 import { config } from '../config';
@@ -527,8 +528,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   resumen += `Número de pedido: ${orderNumber}\n\n`;
   resumen += `${lineasTexto}\n`;
   resumen += `Recogida: ${recogidaTexto}\n`;
-  resumen += `Total: ${precioTotal.toFixed(2)} €\n\n`;
-  resumen += `Pago en el local al recoger. ¡Te esperamos! 🍕`;
+  resumen += `Total: ${precioTotal.toFixed(2)} €`;
 
   await ctx.reply(resumen);
 
@@ -543,6 +543,96 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
   sendToAllStaff(avisoStaff).catch(err => warn('PizzaFlow', `Error notificando a staff: ${(err as Error).message}`));
 
   ctx.session.pizzaOrder = undefined;
+
+  await preguntarPago(ctx, orderNumber, precioTotal);
+}
+
+// ── Pago ──────────────────────────────────────────────────────────────────────
+
+// El pago por adelantado es OPCIONAL: la reserva ya está hecha y el stock ya
+// está descontado antes de llegar aquí. Si el cliente no paga, no se pierde
+// nada; simplemente se cobra en el local, como hasta ahora.
+async function preguntarPago(ctx: BotContext, orderNumber: string, total: number): Promise<void> {
+  if (!config.telegramPaymentToken) {
+    pagos.registrar(orderNumber, 'local', total);
+    await ctx.reply('Pago en el local al recoger. ¡Te esperamos! 🍕');
+    return;
+  }
+  await ctx.reply(
+    `¿Cómo prefieres pagar los ${total.toFixed(2)} €?`,
+    Markup.inlineKeyboard([
+      [Markup.button.callback('💳 Pagar ahora con tarjeta', `pz_pagar|${orderNumber}`)],
+      [Markup.button.callback('🏪 Pagar en el local al recoger', `pz_local|${orderNumber}`)],
+    ])
+  );
+}
+
+export async function handlePagoLocal(ctx: BotContext, orderNumber: string): Promise<void> {
+  const pedido = pizzaService.getOrderByNumber(orderNumber);
+  if (!pedido) return;
+  pagos.registrar(orderNumber, 'local', pedido.precioTotal);
+  await ctx.reply(`Perfecto. Pagas ${pedido.precioTotal.toFixed(2)} € en el local al recoger. ¡Te esperamos! 🍕`);
+}
+
+export async function handlePagarAhora(ctx: BotContext, orderNumber: string): Promise<void> {
+  const pedido = pizzaService.getOrderByNumber(orderNumber);
+  if (!pedido) {
+    await ctx.reply('No encuentro esa reserva. Escribe /pizza para empezar de nuevo.');
+    return;
+  }
+  if (!config.telegramPaymentToken) {
+    await ctx.reply('El pago con tarjeta no está disponible ahora mismo. Se paga en el local.');
+    return;
+  }
+  pagos.registrar(orderNumber, 'online', pedido.precioTotal);
+
+  try {
+    // Telegram trabaja en céntimos y no admite decimales.
+    await ctx.replyWithInvoice({
+      title: `Reserva de pizza ${orderNumber}`,
+      description: pizzaService.itemsLabel(pedido.items).slice(0, 255),
+      payload: orderNumber,
+      provider_token: config.telegramPaymentToken,
+      currency: 'EUR',
+      prices: [{ label: `Pedido ${orderNumber}`, amount: Math.round(pedido.precioTotal * 100) }],
+    });
+  } catch (err) {
+    warn('PizzaFlow', `No se pudo enviar la factura de ${orderNumber}: ${(err as Error).message}`);
+    await ctx.reply(
+      'No he podido abrir el pago con tarjeta. No pasa nada: la reserva está hecha y se paga en el local.'
+    );
+  }
+}
+
+// Telegram exige responder al pre-checkout en menos de 10 segundos o cancela
+// el cobro. No hay nada que validar aquí: el stock ya se descontó al reservar.
+export async function handlePreCheckout(ctx: BotContext): Promise<void> {
+  try {
+    await (ctx as unknown as { answerPreCheckoutQuery: (ok: boolean) => Promise<unknown> })
+      .answerPreCheckoutQuery(true);
+  } catch (err) {
+    warn('PizzaFlow', `answerPreCheckoutQuery falló: ${(err as Error).message}`);
+  }
+}
+
+export async function handlePagoConfirmado(ctx: BotContext): Promise<void> {
+  const sp = (ctx.message as { successful_payment?: {
+    invoice_payload: string; total_amount: number; provider_payment_charge_id?: string;
+  } }).successful_payment;
+  if (!sp) return;
+
+  const orderNumber = sp.invoice_payload;
+  pagos.marcarPagado(orderNumber, sp.provider_payment_charge_id);
+  const importe = (sp.total_amount / 100).toFixed(2);
+
+  log('PizzaFlow', `Pago recibido de ${orderNumber}: ${importe} €`);
+  await ctx.reply(
+    `✅ Pago recibido: ${importe} €.
+
+Tu reserva ${orderNumber} queda pagada. ¡Te esperamos! 🍕`
+  );
+  sendToAllStaff(`💳 PAGADO — ${orderNumber} (${importe} €)`)
+    .catch(err => warn('PizzaFlow', `Error notificando pago: ${(err as Error).message}`));
 }
 
 // ── Cancelación de reservas ───────────────────────────────────────────────────

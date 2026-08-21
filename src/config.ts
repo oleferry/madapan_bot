@@ -50,6 +50,7 @@ export const config = {
   waybillMapPath: process.env['WAYBILL_MAP_PATH'] ?? persistPath('waybill-map.json', 'data/waybill-map.json'),
   encargosPath: process.env['ENCARGOS_PATH'] ?? persistPath('encargos.json', 'data/encargos.json'),
   historicoPath: process.env['HISTORICO_PATH'] ?? persistPath('historico-ventas.json', 'data/historico-ventas.json'),
+  pagosPath: process.env['PAGOS_PATH'] ?? persistPath('pizza-pagos.json', 'data/pizza-pagos.json'),
   sobrasPath: process.env['SOBRAS_PATH'] ?? persistPath('sobras.json', 'data/sobras.json'),
   comprasPath: process.env['COMPRAS_PATH'] ?? persistPath('compras.json', 'data/compras.json'),
   // Día de la semana del borrador de pedidos a proveedor (3 = miércoles).
@@ -72,6 +73,9 @@ export const config = {
   // Remitente del envío a Holded por la API de Gmail. Railway bloquea el SMTP
   // saliente (587 y 465 dan ETIMEDOUT), así que el correo sale por HTTPS.
   gmailRemitente: process.env['GMAIL_REMITENTE'] ?? '',
+  // Token de pagos de Telegram (proveedor Stripe, se saca en @BotFather).
+  // Sin esto, el bot solo ofrece pagar en el local.
+  telegramPaymentToken: process.env['TELEGRAM_PAYMENT_TOKEN'] ?? '',
 };
 
 export const isDryRun = config.dryRun;

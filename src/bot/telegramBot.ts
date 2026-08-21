@@ -49,6 +49,10 @@ import {
   handleAdminCancelPizza,
   handlePizzaCancelPrompt,
   handlePizzaCancelConfirm,
+  handlePagarAhora,
+  handlePagoLocal,
+  handlePreCheckout,
+  handlePagoConfirmado,
 } from './pizzaFlow';
 import {
   handleEncargoStart,
@@ -92,6 +96,8 @@ import {
   handleSobrasCantidad,
   handleSobrasManual,
   handleSobrasFin,
+  handleOtroProducto,
+  handleGuardar,
   handleAjuste,
   handleAjusteBoton,
   handleSobraText,
@@ -720,6 +726,18 @@ export function createBot(): Telegraf<BotContext> {
         return;
       }
 
+      // pz_pagar|PZ-XXXX — pagar ahora con tarjeta
+      if (data.startsWith('pz_pagar|')) {
+        await handlePagarAhora(ctx, data.split('|')[1]!);
+        return;
+      }
+
+      // pz_local|PZ-XXXX — pagar en el local al recoger
+      if (data.startsWith('pz_local|')) {
+        await handlePagoLocal(ctx, data.split('|')[1]!);
+        return;
+      }
+
       // pz_mas — añadir otra pizza al carrito
       if (data === 'pz_mas') {
         await handlePizzaMas(ctx);
@@ -896,6 +914,14 @@ export function createBot(): Telegraf<BotContext> {
         await handleSobrasFin(ctx);
         return;
       }
+      if (data === 'sb_otro_prod') {
+        await handleOtroProducto(ctx);
+        return;
+      }
+      if (data === 'sb_guardar') {
+        await handleGuardar(ctx);
+        return;
+      }
       if (data === 'sb_otro') {
         await handleSobrasStart(ctx);
         return;
@@ -984,6 +1010,11 @@ export function createBot(): Telegraf<BotContext> {
     if (!isStaff(ctx)) return;
     await handleDocumento(ctx);
   });
+
+  // ── Pagos (Telegram Payments) ───────────────────────────────────────────────
+  // Telegram corta el cobro si el pre-checkout no se responde en 10 segundos.
+  bot.on('pre_checkout_query', handlePreCheckout);
+  bot.on('successful_payment', handlePagoConfirmado);
 
   // ── Error handler ───────────────────────────────────────────────────────────
   bot.catch((err, ctx) => {

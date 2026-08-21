@@ -3,6 +3,7 @@ import { Message } from 'telegraf/types';
 import { BotContext } from './customerFlows';
 import * as sobras from '../services/sobrasService';
 import * as historico from '../services/historicoVentas';
+import { productosDelDia } from '../services/productionSummary';
 import { formatDateSpanish, getTodayDate } from '../utils/dates';
 import { config } from '../config';
 import { log } from '../utils/logger';
@@ -11,13 +12,12 @@ import { log } from '../utils/logger';
 // WhatsApp.
 //
 // Solo la tienda: en los puntos de reparto la devolución ya se mete en el
-// albarán, así que lo entregado en Holded ya viene neto y no hay nada que
-// anotar aparte. Contarlo dos veces daría un ajuste falso.
+// albarán, así que lo entregado en Holded viene neto y anotarlo aparte
+// contaría dos veces lo mismo.
 //
-// La clave para que se use de verdad: no hacer escribir. El bot ya sabe lo que
-// salió ese día (está en el albarán de Madapan), así que enseña esos productos
-// uno a uno y solo hay que tocar la cantidad. Lo que no se toca, se da por
-// vendido.
+// La lista sale de la PRODUCCIÓN del día, no del albarán de la tienda: es lo
+// que de verdad se ha horneado, y el pan del mostrador no lleva albarán hasta
+// que se vende. Al final siempre se ofrece añadir algo suelto a mano.
 
 // Nombre del punto propio tal y como está en Holded.
 const TIENDA = process.env['PUNTO_PROPIO'] ?? 'Madapan';
@@ -25,7 +25,7 @@ const TIENDA = process.env['PUNTO_PROPIO'] ?? 'Madapan';
 export interface SobraSessionData {
   fecha?: string;
   cliente?: string;
-  entregado?: Array<{ producto: string; sku: string; units: number }>;
+  produccion?: Array<{ producto: string; sku: string; units: number }>;
   lineas: sobras.SobraLinea[];
   idx?: number;                  // producto por el que va
 }
@@ -35,7 +35,7 @@ function esStaff(ctx: BotContext): boolean {
 }
 
 // Las sobras se cuentan y se comunican el mismo día, así que no se pregunta la
-// fecha: se entra directo a lo de hoy. El comando admite una fecha suelta
+// fecha: se entra directo a lo de hoy. Admite una fecha suelta
 // (/sobras 2026-08-20) por si algún día hay que corregir a posteriori.
 export async function handleSobrasStart(ctx: BotContext, fecha?: string): Promise<void> {
   if (!esStaff(ctx)) return;
@@ -50,28 +50,31 @@ export async function handleSobrasDia(ctx: BotContext, fecha: string): Promise<v
   s.fecha = fecha;
   s.cliente = TIENDA;
 
-  const entregas = await historico.cargar();
-  const suya = entregas.find(e => e.cliente === TIENDA && e.fecha === fecha);
-  s.entregado = (suya?.lineas ?? []).map(l => ({ producto: l.name, sku: l.sku, units: l.units }));
+  let lista = (await productosDelDia(fecha)).map(p => ({
+    producto: p.producto, sku: p.sku ?? '', units: p.units,
+  }));
 
-  if (s.entregado.length) {
-    await ctx.reply(
-      `🥖 Sobras de ${TIENDA} — ${formatDateSpanish(fecha)}
-` +
-      `${s.entregado.length} productos. Ve marcando lo que ha sobrado.`
-    );
+  // Sin producción registrada, se cae al albarán de la tienda: al menos da los
+  // productos habituales para no obligar a escribirlo todo.
+  if (!lista.length) {
+    const entregas = await historico.cargar();
+    const suya = entregas.find(e => e.cliente === TIENDA && e.fecha === fecha);
+    lista = (suya?.lineas ?? []).map(l => ({ producto: l.name, sku: l.sku, units: l.units }));
   }
+  s.produccion = lista;
 
-  if (!s.entregado.length) {
+  if (!lista.length) {
     await ctx.reply(
-      `No tengo lo que salió a ${TIENDA} el ${formatDateSpanish(fecha)}. ` +
-      'Si el albarán es de hoy, puede que aún no esté descargado: prueba /historico_refrescar.'
+      `No tengo producción registrada del ${formatDateSpanish(fecha)}, ` +
+      'pero puedes anotar productos sueltos.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ Anotar un producto', 'sb_otro_prod')]])
     );
     return;
   }
+
   await ctx.reply(
     `🥖 Sobras de ${TIENDA} — ${formatDateSpanish(fecha)}\n` +
-    `${s.entregado.length} productos. Ve marcando lo que ha sobrado.`
+    `${lista.length} producto(s) en producción. Ve marcando lo que ha sobrado.`
   );
   s.idx = 0;
   await preguntarProducto(ctx);
@@ -79,13 +82,22 @@ export async function handleSobrasDia(ctx: BotContext, fecha: string): Promise<v
 
 async function preguntarProducto(ctx: BotContext): Promise<void> {
   const s = ctx.session.sobra;
-  if (!s?.entregado || s.idx === undefined) return;
+  if (!s?.produccion || s.idx === undefined) return;
 
-  if (s.idx >= s.entregado.length) {
-    await confirmar(ctx);
+  if (s.idx >= s.produccion.length) {
+    // Siempre se ofrece añadir algo que no estaba: hay días con producto
+    // suelto que no aparece en ningún pedido.
+    await ctx.reply(
+      'Eso es todo lo de la lista. ¿Ha sobrado algo más que no salga arriba?',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Añadir otro producto', 'sb_otro_prod')],
+        [Markup.button.callback('✅ Terminar', 'sb_guardar')],
+      ])
+    );
     return;
   }
-  const p = s.entregado[s.idx]!;
+
+  const p = s.produccion[s.idx]!;
   const opciones = [0, 1, 2, 3, 4, 5].filter(n => n <= p.units);
   const filas: ReturnType<typeof Markup.button.callback>[][] = [];
   for (let i = 0; i < opciones.length; i += 3) {
@@ -95,7 +107,7 @@ async function preguntarProducto(ctx: BotContext): Promise<void> {
   filas.push([Markup.button.callback('⏭️ Del resto no sobró nada', 'sb_fin')]);
 
   await ctx.reply(
-    `${p.producto} — se entregaron ${p.units}\n¿Cuántos han sobrado?`,
+    `${p.producto} — producidos ${p.units}\n¿Cuántos han sobrado?`,
     Markup.inlineKeyboard(filas)
   );
 }
@@ -103,8 +115,8 @@ async function preguntarProducto(ctx: BotContext): Promise<void> {
 export async function handleSobrasCantidad(ctx: BotContext, n: number): Promise<void> {
   if (!esStaff(ctx)) return;
   const s = ctx.session.sobra;
-  if (!s?.entregado || s.idx === undefined) return;
-  const p = s.entregado[s.idx]!;
+  if (!s?.produccion || s.idx === undefined) return;
+  const p = s.produccion[s.idx]!;
   if (n > 0) s.lineas.push({ producto: p.producto, ...(p.sku ? { sku: p.sku } : {}), cantidad: n });
   s.idx += 1;
   await preguntarProducto(ctx);
@@ -120,7 +132,23 @@ export async function handleSobrasFin(ctx: BotContext): Promise<void> {
   if (!esStaff(ctx)) return;
   const s = ctx.session.sobra;
   if (!s) return;
-  s.idx = (s.entregado ?? []).length;   // el resto queda a cero
+  s.idx = (s.produccion ?? []).length;   // el resto queda a cero
+  await preguntarProducto(ctx);          // remata ofreciendo el producto libre
+}
+
+// ── Producto que no estaba en la lista ────────────────────────────────────────
+
+export async function handleOtroProducto(ctx: BotContext): Promise<void> {
+  if (!esStaff(ctx)) return;
+  ctx.session.sobra ??= { lineas: [] };
+  ctx.session.step = 'sb_awaiting_producto';
+  await ctx.reply(
+    '¿Qué ha sobrado? Escríbelo con la cantidad delante.\nPor ejemplo: 3 empanada de bonito'
+  );
+}
+
+export async function handleGuardar(ctx: BotContext): Promise<void> {
+  if (!esStaff(ctx)) return;
   await confirmar(ctx);
 }
 
@@ -136,14 +164,14 @@ async function confirmar(ctx: BotContext): Promise<void> {
   });
 
   let txt = s.lineas.length
-    ? `✅ Sobras anotadas — ${s.cliente}, ${formatDateSpanish(s.fecha)}\n\n` +
+    ? `✅ Sobras anotadas — ${formatDateSpanish(s.fecha)}\n\n` +
       s.lineas.map(l => `  ${l.cantidad} × ${l.producto}`).join('\n')
-    : `✅ Anotado: no sobró nada en ${s.cliente} el ${formatDateSpanish(s.fecha)}.`;
+    : `✅ Anotado: no sobró nada el ${formatDateSpanish(s.fecha)}.`;
   if (previa) txt += '\n\n(Sustituye al recuento anterior de ese día.)';
 
-  const cliente = s.cliente;
+  const fecha = s.fecha;
   delete ctx.session.sobra;
-  log('SobraFlow', `Sobras de ${cliente} ${s.fecha} por ${ctx.from?.id}`);
+  log('SobraFlow', `Sobras de ${TIENDA} ${fecha} por ${ctx.from?.id}`);
   await ctx.reply(txt, Markup.inlineKeyboard([
     [Markup.button.callback('📊 Ver producción sugerida', `sb_aj|0|${new Date().getDay()}`)],
   ]));
@@ -154,19 +182,12 @@ async function confirmar(ctx: BotContext): Promise<void> {
 export async function handleAjuste(ctx: BotContext, consulta: string, dow: number): Promise<void> {
   if (!esStaff(ctx)) return;
   const entregas = await historico.cargar();
-  const todos = historico.clientes(entregas);
 
-  const q = consulta.toLowerCase().trim();
-  if (!q) {
-    await ctx.reply(
-      'Uso: /ajuste <parte del nombre del punto>\nPor ejemplo: /ajuste arco\n\nO elige uno:',
-      Markup.inlineKeyboard(
-        todos.slice(0, 8).map((c, i) => [Markup.button.callback(c.cliente.slice(0, 60), `sb_aj|${i}|${dow}`)])
-      )
-    );
-    return;
-  }
-  const encontrados = todos.filter(c => c.cliente.toLowerCase().includes(q));
+  // Sin nombre, la tienda: es el único punto con recuento de sobras y por
+  // tanto el único donde el ajuste tiene dos cosas que cruzar. Se admite un
+  // nombre por si se quiere ver la media entregada de un punto de reparto.
+  const q = (consulta.trim() || TIENDA).toLowerCase();
+  const encontrados = historico.clientes(entregas).filter(c => c.cliente.toLowerCase().includes(q));
   if (!encontrados.length) {
     await ctx.reply(`No encuentro ningún punto que se parezca a "${consulta}".`);
     return;
@@ -184,11 +205,36 @@ export async function handleAjusteBoton(ctx: BotContext, _idx: number, dow: numb
 // ── Texto libre ───────────────────────────────────────────────────────────────
 
 export async function handleSobraText(ctx: BotContext): Promise<boolean> {
-  if (ctx.session.step !== 'sb_awaiting_cantidad') return false;
+  const paso = ctx.session.step;
+  if (paso !== 'sb_awaiting_cantidad' && paso !== 'sb_awaiting_producto') return false;
   if (!ctx.message || !('text' in ctx.message)) return false;
   if (!esStaff(ctx)) return false;
 
-  const n = parseInt((ctx.message as Message.TextMessage).text.trim(), 10);
+  const texto = (ctx.message as Message.TextMessage).text.trim();
+
+  if (paso === 'sb_awaiting_producto') {
+    // "3 empanada de bonito" → 3 + el nombre. Sin número delante, 1.
+    const m = /^(\d+(?:[.,]\d+)?)\s+(.+)$/.exec(texto);
+    const cantidad = m ? parseFloat(m[1]!.replace(',', '.')) : 1;
+    const producto = (m ? m[2]! : texto).trim();
+    if (!producto) {
+      await ctx.reply('No he entendido el producto. Escribe por ejemplo: 3 empanada de bonito');
+      return true;
+    }
+    const s = (ctx.session.sobra ??= { lineas: [] });
+    s.lineas.push({ producto, cantidad });
+    ctx.session.step = 'idle';
+    await ctx.reply(
+      `Anotado: ${cantidad} × ${producto}`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Añadir otro', 'sb_otro_prod')],
+        [Markup.button.callback('✅ Terminar', 'sb_guardar')],
+      ])
+    );
+    return true;
+  }
+
+  const n = parseInt(texto, 10);
   if (isNaN(n) || n < 0) {
     await ctx.reply('Escribe un número (0 o más).');
     return true;

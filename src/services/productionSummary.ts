@@ -44,3 +44,31 @@ export async function buildProductionSummary(
 
   return text;
 }
+
+// Productos que se producen ese día: pedidos de Holded más encargos. Es lo que
+// hay que poder contar al cerrar, y no coincide con el albarán de la tienda:
+// el pan que se hornea para el mostrador no lleva albarán hasta que se vende.
+export async function productosDelDia(
+  dateStr: string
+): Promise<Array<{ producto: string; sku?: string; units: number }>> {
+  const totales = new Map<string, { producto: string; sku?: string; units: number }>();
+
+  for (const order of await listAllOrdersForDate(dateStr)) {
+    for (const line of order.lines) {
+      if (line.units <= 0) continue;
+      const clave = line.name.toLowerCase().trim();
+      const t = totales.get(clave) ?? { producto: line.name, ...(line.sku ? { sku: line.sku } : {}), units: 0 };
+      t.units += line.units;
+      totales.set(clave, t);
+    }
+  }
+
+  for (const e of encargos.totalesDelDia(dateStr)) {
+    const clave = e.producto.toLowerCase().trim();
+    const t = totales.get(clave) ?? { producto: e.producto, units: 0 };
+    t.units += e.cantidad;
+    totales.set(clave, t);
+  }
+
+  return [...totales.values()].sort((a, b) => b.units - a.units);
+}
