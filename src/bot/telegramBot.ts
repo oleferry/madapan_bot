@@ -101,6 +101,7 @@ import {
   handleAjuste,
   handleAjusteBoton,
   handleSobraText,
+  handleVerSobras,
 } from './sobraFlow';
 import {
   handleCambiosStart,
@@ -375,6 +376,12 @@ export function createBot(): Telegraf<BotContext> {
     await handleCambiosStart(ctx, ctx.message.text.replace(/^\/cambios(@\S+)?/, '').trim());
   });
 
+  // Revisar los recuentos de sobras ya anotados.
+  bot.command('sobras_ver', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handleVerSobras(ctx);
+  });
+
   // Cambios temporales que siguen puestos y habría que deshacer.
   bot.command('pendientes', async (ctx) => {
     if (!isStaff(ctx)) return;
@@ -473,6 +480,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'pendientes', description: 'Cambios temporales sin deshacer (staff)' },
     { command: 'cambios', description: 'Aplicar cambios de pedidos desde un mensaje (staff)' },
     { command: 'sobras', description: 'Anotar lo que ha sobrado en la tienda (staff)' },
+    { command: 'sobras_ver', description: 'Ver las sobras ya anotadas (staff)' },
     { command: 'ajuste', description: 'Produccion sugerida de la tienda (staff)' },
     { command: 'apuntar', description: 'Apuntar algo para pedir (staff)' },
     { command: 'compras', description: 'Ver y enviar los pedidos a proveedor (staff)' },

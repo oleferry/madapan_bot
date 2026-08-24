@@ -45,15 +45,22 @@ export async function buildProductionSummary(
   return text;
 }
 
-// Productos que se producen ese día: pedidos de Holded más encargos. Es lo que
-// hay que poder contar al cerrar, y no coincide con el albarán de la tienda:
-// el pan que se hornea para el mostrador no lleva albarán hasta que se vende.
+// Productos que se producen ese día: pedidos de Holded más encargos.
+//
+// "soloCliente" limita a un punto concreto. Para contar sobras hay que pasar
+// la tienda: lo que se hornea para los puntos de reparto va en su albarán y no
+// se cuenta aquí. Sin filtro, /sobras preguntaba por los 11 productos de toda
+// la producción en vez de por los 4 o 5 del mostrador.
 export async function productosDelDia(
-  dateStr: string
+  dateStr: string,
+  soloCliente?: string
 ): Promise<Array<{ producto: string; sku?: string; units: number }>> {
   const totales = new Map<string, { producto: string; sku?: string; units: number }>();
+  const suyo = (nombre: string): boolean =>
+    !soloCliente || nombre.toLowerCase().includes(soloCliente.toLowerCase());
 
   for (const order of await listAllOrdersForDate(dateStr)) {
+    if (!suyo(order.contactName ?? '')) continue;
     for (const line of order.lines) {
       if (line.units <= 0) continue;
       const clave = line.name.toLowerCase().trim();

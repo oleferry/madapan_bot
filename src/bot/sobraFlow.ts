@@ -50,7 +50,9 @@ export async function handleSobrasDia(ctx: BotContext, fecha: string): Promise<v
   s.fecha = fecha;
   s.cliente = TIENDA;
 
-  let lista = (await productosDelDia(fecha)).map(p => ({
+  // Solo la producción de la TIENDA: lo de los puntos de reparto ya va en su
+  // albarán, y mezclarlo obligaba a pasar por productos que aquí no se venden.
+  let lista = (await productosDelDia(fecha, TIENDA)).map(p => ({
     producto: p.producto, sku: p.sku ?? '', units: p.units,
   }));
 
@@ -242,4 +244,44 @@ export async function handleSobraText(ctx: BotContext): Promise<boolean> {
   ctx.session.step = 'idle';
   await handleSobrasCantidad(ctx, n);
   return true;
+}
+
+// ── Revisar lo anotado ────────────────────────────────────────────────────────
+
+// Sin esto no había forma de saber si alguien anotó las sobras de un día: el
+// fichero vive en el volumen de Railway y los logs se pierden al desplegar.
+export async function handleVerSobras(ctx: BotContext, dias = 14): Promise<void> {
+  if (!esStaff(ctx)) return;
+  const todas = sobras.todas().sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, dias);
+  if (!todas.length) {
+    await ctx.reply('Todavía no se ha anotado ninguna sobra. Se hace con /sobras.');
+    return;
+  }
+
+  let txt = `🥖 Últimos ${todas.length} recuento(s) de sobras\n\n`;
+  for (const s of todas) {
+    txt += `— ${formatDateSpanish(s.fecha)} —\n`;
+    if (!s.lineas.length) {
+      txt += '   no sobró nada\n';
+    } else {
+      for (const l of s.lineas) txt += `   ${l.cantidad} × ${l.producto}\n`;
+    }
+  }
+
+  // Los días de los que NO hay recuento son la información que de verdad
+  // falta: sin ellos el ajuste no tiene con qué comparar.
+  const anotados = new Set(sobras.todas().map(s => s.fecha));
+  const huecos: string[] = [];
+  const hoy = new Date(`${getTodayDate()}T12:00:00Z`);
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(hoy);
+    d.setUTCDate(d.getUTCDate() - i);
+    const f = d.toISOString().slice(0, 10);
+    if (!anotados.has(f)) huecos.push(formatDateSpanish(f));
+  }
+  if (huecos.length) {
+    txt += `\n⚠️ Sin anotar en los últimos 7 días: ${huecos.join(', ')}`;
+  }
+
+  await ctx.reply(txt);
 }
