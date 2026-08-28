@@ -1,6 +1,7 @@
 import * as historico from './historicoVentas';
 import * as ps from './pedidosSemanaService';
 import * as sobrasService from './sobrasService';
+import * as tickets from './ticketsService';
 import { log } from '../utils/logger';
 
 // Ajuste semanal de cantidades a partir de lo que de verdad se vende.
@@ -121,7 +122,8 @@ export interface VentaDia {
 // nada (devuelto 0, sube el 10 %) y que no sepamos si volvió algo. Lo segundo
 // no se toca.
 export function ventaSemanaAnterior(
-  entregas: historico.Entrega[], cliente: string, dow: number, hoy: string
+  entregas: historico.Entrega[], cliente: string, dow: number, hoy: string,
+  ventasMostrador?: Map<string, tickets.VentaMostrador>
 ): VentaDia[] {
   const fecha = ultimoDiaSemana(hoy, dow);
   const suyas = entregas.filter(e => e.cliente === cliente);
@@ -130,11 +132,15 @@ export function ventaSemanaAnterior(
 
   const esTienda = ps.normalizar(cliente) === ps.normalizar(TIENDA);
 
+  // Tienda: lo mejor es el ticket, que dice lo VENDIDO sin que nadie cuente
+  // nada. Si ese día no hay tickets, se cae al recuento de /sobras.
   // Reparto: la devolución viene en el albarán del día siguiente.
-  // Tienda: viene del recuento de /sobras de ese mismo día.
   const siguiente = suyas.find(e => e.fecha === siguienteDia(fecha));
-  const recuento = esTienda ? sobrasService.sobrasDe(cliente, fecha) : undefined;
-  const hayDato = esTienda ? Boolean(recuento) : Boolean(siguiente);
+  const delMostrador = esTienda ? ventasMostrador?.get(fecha) : undefined;
+  const recuento = esTienda && !delMostrador ? sobrasService.sobrasDe(cliente, fecha) : undefined;
+  const hayDato = esTienda
+    ? Boolean(delMostrador) || Boolean(recuento)
+    : Boolean(siguiente);
 
   const devueltoPor = new Map<string, number>();
   if (esTienda) {
@@ -149,6 +155,17 @@ export function ventaSemanaAnterior(
 
   return historico.servido(dia).map(l => {
     const k = l.sku || l.name;
+    // Con tickets, la venta se lee directamente y la "devolución" es lo que
+    // sale de restar: es información derivada, no un dato aparte.
+    if (delMostrador) {
+      const venta = tickets.vendido(delMostrador, l.sku, l.name);
+      return {
+        producto: l.name, sku: l.sku, servido: l.units,
+        devuelto: Math.max(0, l.units - venta), venta,
+        sugerido: Math.max(0, Math.ceil(venta * MARGEN - 0.001)),
+        fecha, hayDatoDevolucion: true,
+      };
+    }
     const devuelto = devueltoPor.get(k) ?? devueltoPor.get(l.name) ?? 0;
     const venta = Math.max(0, l.units - devuelto);
     return {
@@ -176,7 +193,11 @@ export function revisarSemanaAnterior(
   entregas: historico.Entrega[],
   filas: ps.FilaPedido[],
   hoy: string,
-  opciones: { minDiferencia?: number; saltoMaximo?: number } = {}
+  opciones: {
+    minDiferencia?: number;
+    saltoMaximo?: number;
+    ventasMostrador?: Map<string, tickets.VentaMostrador>;
+  } = {}
 ): Revision {
   const minDiferencia = opciones.minDiferencia ?? 1;
   const saltoMaximo = opciones.saltoMaximo ?? 0.4;
@@ -193,7 +214,7 @@ export function revisarSemanaAnterior(
 
     for (let dow = 0; dow < 7; dow++) {
       const dia = ps.DIAS[dow]!;
-      for (const v of ventaSemanaAnterior(entregas, cliente, dow, hoy)) {
+      for (const v of ventaSemanaAnterior(entregas, cliente, dow, hoy, opciones.ventasMostrador)) {
         if (!v.hayDatoDevolucion) {
           // Sin saber si volvió algo, subir un 10 % sería inventar.
           sinDato.add(`${punto} — ${dia} (${v.fecha})`);

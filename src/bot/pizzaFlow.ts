@@ -3,6 +3,7 @@ import { Message } from 'telegraf/types';
 import { BotContext } from './customerFlows';
 import * as pizzaService from '../services/pizzaService';
 import * as pagos from '../services/pagosService';
+import * as stripe from '../services/stripeClient';
 import { sendToAdmin, sendToAllStaff } from '../services/notifier';
 import { log, warn } from '../utils/logger';
 import { config } from '../config';
@@ -553,7 +554,7 @@ async function confirmarPedido(ctx: BotContext, email: string): Promise<void> {
 // está descontado antes de llegar aquí. Si el cliente no paga, no se pierde
 // nada; simplemente se cobra en el local, como hasta ahora.
 async function preguntarPago(ctx: BotContext, orderNumber: string, total: number): Promise<void> {
-  if (!config.telegramPaymentToken) {
+  if (!config.telegramPaymentToken && !stripe.estaConfigurado()) {
     pagos.registrar(orderNumber, 'local', total);
     await ctx.reply('Pago en el local al recoger. ¡Te esperamos! 🍕');
     return;
@@ -580,11 +581,33 @@ export async function handlePagarAhora(ctx: BotContext, orderNumber: string): Pr
     await ctx.reply('No encuentro esa reserva. Escribe /pizza para empezar de nuevo.');
     return;
   }
-  if (!config.telegramPaymentToken) {
+  if (!config.telegramPaymentToken && !stripe.estaConfigurado()) {
     await ctx.reply('El pago con tarjeta no está disponible ahora mismo. Se paga en el local.');
     return;
   }
   pagos.registrar(orderNumber, 'online', pedido.precioTotal);
+
+  // Sin token de Telegram se cobra por enlace de Stripe. El cliente sale al
+  // navegador, que es un paso más, pero funciona sin depender de la lista de
+  // proveedores del BotFather.
+  if (!config.telegramPaymentToken) {
+    try {
+      const enlace = await stripe.crearEnlace(
+        orderNumber, pedido.precioTotal,
+        `Reserva de pizza ${orderNumber} — Madapan`
+      );
+      pagos.guardarEnlace(orderNumber, enlace.id, enlace.url);
+      await ctx.reply(
+        `💳 Paga aquí tus ${pedido.precioTotal.toFixed(2)} €:\n${enlace.url}\n\n` +
+        'La reserva ya está hecha. Si al final no pagas, no pasa nada: se cobra en el local.' +
+        (stripe.esModoPrueba() ? '\n\n⚠️ MODO PRUEBA: no se cobra de verdad.' : '')
+      );
+    } catch (err) {
+      warn('PizzaFlow', `Enlace de Stripe falló para ${orderNumber}: ${(err as Error).message}`);
+      await ctx.reply('No he podido generar el enlace de pago. La reserva está hecha; se paga en el local.');
+    }
+    return;
+  }
 
   try {
     // Telegram trabaja en céntimos y no admite decimales.

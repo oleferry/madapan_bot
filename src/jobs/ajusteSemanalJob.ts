@@ -4,6 +4,7 @@ import { toZonedTime, format } from 'date-fns-tz';
 import * as historico from '../services/historicoVentas';
 import * as ps from '../services/pedidosSemanaService';
 import * as aj from '../services/ajusteSemanalService';
+import * as tickets from '../services/ticketsService';
 import { config } from '../config';
 import { log, error } from '../utils/logger';
 
@@ -39,7 +40,14 @@ export async function revisarYAvisar(telegram: Telegram): Promise<string> {
   // una caché de hace días.
   const entregas = await historico.cargar(true);
   const filas = await ps.leer();
-  const { cambios, bruscos, sinDato } = aj.revisarSemanaAnterior(entregas, filas, hoy);
+
+  // Ventas del mostrador de la última semana: para la tienda es el dato bueno,
+  // porque dice lo vendido sin que nadie tenga que contar sobras.
+  const hace10 = new Date(`${hoy}T12:00:00Z`);
+  hace10.setUTCDate(hace10.getUTCDate() - 10);
+  const ventasMostrador = await tickets.ventasDesde(hace10.toISOString().slice(0, 10));
+
+  const { cambios, bruscos, sinDato } = aj.revisarSemanaAnterior(entregas, filas, hoy, { ventasMostrador });
 
   propuesta = cambios.length ? { cambios, generadaEl: hoy } : null;
 

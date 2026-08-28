@@ -18,6 +18,8 @@ export interface Pago {
   estado: 'pendiente' | 'pagado';
   importe: number;
   chargeId?: string;        // id del cargo que devuelve Telegram/Stripe
+  sessionId?: string;       // sesión de Stripe, para poder consultarla
+  url?: string;             // enlace de pago que se le mandó al cliente
   creadoEn: string;
   pagadoEn?: string;
 }
@@ -55,6 +57,20 @@ export function registrar(orderNumber: string, metodo: MetodoPago, importe: numb
   guardar();
   log('Pagos', `${orderNumber}: ${metodo}, ${importe.toFixed(2)} €`);
   return p;
+}
+
+export function guardarEnlace(orderNumber: string, sessionId: string, url: string): void {
+  const p = cargar()[orderNumber];
+  if (!p) return;
+  p.sessionId = sessionId;
+  p.url = url;
+  guardar();
+}
+
+// Los que se fueron a pagar por enlace y siguen sin confirmarse. Son los que
+// hay que preguntarle a Stripe.
+export function pendientesOnline(): Pago[] {
+  return Object.values(cargar()).filter(p => p.estado === 'pendiente' && p.sessionId);
 }
 
 export function marcarPagado(orderNumber: string, chargeId?: string): Pago | null {

@@ -77,6 +77,11 @@ export const config = {
   // Token de pagos de Telegram (proveedor Stripe, se saca en @BotFather).
   // Sin esto, el bot solo ofrece pagar en el local.
   telegramPaymentToken: process.env['TELEGRAM_PAYMENT_TOKEN'] ?? '',
+  // Cobro por enlace de Stripe. Se usa cuando no hay TELEGRAM_PAYMENT_TOKEN,
+  // que es el caso mientras Stripe no aparezca en el BotFather de la cuenta.
+  stripeSecretKey: process.env['STRIPE_SECRET_KEY'] ?? '',
+  // A dónde vuelve el cliente después de pagar.
+  botUrl: process.env['BOT_URL'] ?? 'https://t.me/madapan_pedidos_bot',
 };
 
 export const isDryRun = config.dryRun;
