@@ -23,7 +23,11 @@ export interface Entrega {
   lineas: EntregaLinea[];
 }
 
-interface Cache { entregas: Entrega[]; actualizado: string; }
+interface Cache { entregas: Entrega[]; actualizado: string; version?: number }
+
+// Se sube cuando cambia lo que se guarda, para que la caché vieja se tire sola.
+// v2: se dejan de filtrar las líneas negativas (son las devoluciones).
+const VERSION = 2;
 
 const RUTA = process.env['HISTORICO_PATH'] ?? config.historicoPath;
 const PAGINAS_MAX = 40;
@@ -49,8 +53,10 @@ function mapear(doc: any): Entrega {
     fecha: new Date(doc.date * 1000).toISOString().slice(0, 10),
     contactId: typeof doc.contact === 'string' ? doc.contact : (doc.contact?.$oid ?? ''),
     cliente: doc.contactName ?? '',
+    // Las líneas NEGATIVAS son devoluciones: lo que sobró y volvió. Antes se
+    // descartaban y el histórico daba lo entregado en bruto, no lo vendido.
     lineas: (doc.products ?? [])
-      .filter((l: any) => Number(l.units) > 0)
+      .filter((l: any) => Number(l.units) !== 0)
       .map((l: any) => ({ sku: l.sku ?? '', name: l.name ?? '', units: Number(l.units) })),
   };
 }
@@ -74,10 +80,12 @@ export async function descargarTodo(): Promise<Entrega[]> {
 export async function cargar(refrescar = false): Promise<Entrega[]> {
   if (!refrescar) {
     memoria ??= leerDisco();
-    if (memoria?.entregas.length) return memoria.entregas;
+    // Una caché de una versión anterior se vuelve a bajar: la de v1 no tiene
+    // las devoluciones y daría cifras infladas sin avisar.
+    if (memoria?.entregas.length && memoria.version === VERSION) return memoria.entregas;
   }
   const entregas = await descargarTodo();
-  memoria = { entregas, actualizado: new Date().toISOString() };
+  memoria = { entregas, actualizado: new Date().toISOString(), version: VERSION };
   escribirDisco(memoria);
   return entregas;
 }
@@ -111,6 +119,14 @@ export interface MediaProducto {
   media: number;         // media por día de entrega
 }
 
+// Positivas de una entrega (lo servido) y negativas (lo devuelto).
+export function servido(e: Entrega): EntregaLinea[] {
+  return e.lineas.filter(l => l.units > 0);
+}
+export function devuelto(e: Entrega): EntregaLinea[] {
+  return e.lineas.filter(l => l.units < 0).map(l => ({ ...l, units: -l.units }));
+}
+
 // Media por producto de un cliente en un día de la semana concreto.
 // Se divide entre los días en que hubo entrega, no entre todos los días: si a
 // un cliente solo se le sirve los sábados, dividir entre 7 daría una media
@@ -123,7 +139,9 @@ export function mediaPorDia(
 
   const m = new Map<string, { producto: string; sku: string; total: number; dias: Set<string> }>();
   for (const e of suyas) {
-    for (const l of e.lineas) {
+    // Solo lo servido: mezclar aquí las devoluciones daría una media que no es
+    // ni lo entregado ni lo vendido.
+    for (const l of servido(e)) {
       const k = l.sku || l.name;
       const v = m.get(k) ?? { producto: l.name, sku: l.sku, total: 0, dias: new Set<string>() };
       v.total += l.units;

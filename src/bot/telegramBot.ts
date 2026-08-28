@@ -122,6 +122,7 @@ import {
 import * as pizzaService from '../services/pizzaService';
 import { sendDailyWaybills } from '../jobs/dailyWaybillsJob';
 import { prepararCargaSemanal, confirmarCargaSemanal, cancelarCargaSemanal } from '../jobs/weeklyOrdersJob';
+import { revisarYAvisar, propuestaPendiente, descartarPropuesta } from '../jobs/ajusteSemanalJob';
 
 function isStaff(ctx: { from?: { id: number } }): boolean {
   return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
@@ -382,6 +383,18 @@ export function createBot(): Telegraf<BotContext> {
     await handleVerSobras(ctx);
   });
 
+  // Revisión de albaranes: venta real (servido − devuelto) y ajuste sugerido.
+  bot.command('revisar_ventas', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await ctx.reply('Bajando los albaranes y calculando la venta real...');
+    try {
+      await revisarYAvisar(ctx.telegram);
+    } catch (err) {
+      error('TelegramBot', `/revisar_ventas failed: ${(err as Error).message}`);
+      await ctx.reply(`Error: ${(err as Error).message}`);
+    }
+  });
+
   // Cambios temporales que siguen puestos y habría que deshacer.
   bot.command('pendientes', async (ctx) => {
     if (!isStaff(ctx)) return;
@@ -477,6 +490,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
     { command: 'encargos_resumen', description: 'Resumen de encargos para la hoja (staff)' },
+    { command: 'revisar_ventas', description: 'Venta real y ajuste de cantidades (staff)' },
     { command: 'pendientes', description: 'Cambios temporales sin deshacer (staff)' },
     { command: 'cambios', description: 'Aplicar cambios de pedidos desde un mensaje (staff)' },
     { command: 'sobras', description: 'Anotar lo que ha sobrado en la tienda (staff)' },
@@ -930,6 +944,30 @@ export function createBot(): Telegraf<BotContext> {
         warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
         return;
       }
+      if (data === 'aj_aplicar' || data === 'aj_no') {
+        if (!isStaff(ctx)) return;
+        if (data === 'aj_no') {
+          descartarPropuesta();
+          await ctx.reply('Vale, no toco la hoja.');
+          return;
+        }
+        const cambios = propuestaPendiente();
+        if (!cambios.length) {
+          await ctx.reply('Ya no tengo esa propuesta. Lanza /revisar_ventas otra vez.');
+          return;
+        }
+        await ctx.reply('Escribiendo en Pedidos_semana...');
+        try {
+          const ps2 = await import('../services/pedidosSemanaService');
+          await ps2.aplicar(cambios);
+          descartarPropuesta();
+          await ctx.reply(`✅ ${cambios.length} celda(s) actualizadas.`);
+        } catch (err) {
+          await ctx.reply(`❌ No he podido escribir: ${(err as Error).message}`);
+        }
+        return;
+      }
+
       if (data.startsWith('rev_') && !isStaff(ctx)) {
         warn('TelegramBot', `Non-staff callback bloqueado: "${data}" from ${ctx.from?.id}`);
         return;
