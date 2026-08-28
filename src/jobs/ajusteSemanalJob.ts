@@ -15,10 +15,11 @@ import { log, error } from '../utils/logger';
 //
 // No escribe nada por su cuenta: manda la propuesta con un botón.
 
-// Solo las últimas semanas: lo de hace medio año no dice nada de lo que se
-// vende hoy, y un cliente que cambió de hábitos quedaría lastrado por su
-// propio pasado.
-const SEMANAS = 6;
+// Nada de promediar meses: se compara contra el MISMO día de la semana
+// pasada, que además es la que está escrita en la hoja. Promediar mezclaría
+// agosto en los pueblos (temporada alta) con el resto del año, y en la ciudad
+// justo al revés: la media saldría de dos realidades distintas y no
+// describiría ninguna.
 
 let propuesta: { cambios: ps.Cambio[]; generadaEl: string } | null = null;
 
@@ -33,19 +34,40 @@ export function scheduleAjusteSemanal(bot: Telegraf<never>): void {
 // desde un comando, donde solo hay ctx.telegram.
 export async function revisarYAvisar(telegram: Telegram): Promise<string> {
   const hoy = format(toZonedTime(new Date(), config.timezone), 'yyyy-MM-dd', { timeZone: config.timezone });
-  const desde = new Date(`${hoy}T12:00:00Z`);
-  desde.setUTCDate(desde.getUTCDate() - SEMANAS * 7);
 
-  // Se fuerza la descarga: la revisión tiene que mirar los albaranes de esta
-  // semana, no una caché de hace días.
+  // Se fuerza la descarga: la revisión mira los albaranes de esta semana, no
+  // una caché de hace días.
   const entregas = await historico.cargar(true);
   const filas = await ps.leer();
-  const { revisiones, cambios, bruscos } = aj.revisar(entregas, filas, {
-    desde: desde.toISOString().slice(0, 10),
-  });
+  const { cambios, bruscos, sinDato } = aj.revisarSemanaAnterior(entregas, filas, hoy);
 
   propuesta = cambios.length ? { cambios, generadaEl: hoy } : null;
-  const texto = aj.textoRevision(revisiones, cambios, bruscos);
+
+  let texto = '📉 *AJUSTE SEGÚN LA SEMANA PASADA*\n\n';
+  texto += '(lo servido menos lo devuelto, +10 %; sin devoluciones sube el 10 %)\n\n';
+  if (!cambios.length && !bruscos.length) {
+    texto += 'Las cantidades de la hoja cuadran con lo que se vendió. No hay nada que tocar.';
+  } else {
+    texto += 'Así quedaría Pedidos_semana:\n\n' + aj.previsualizar(filas, cambios);
+    const menos = cambios.reduce((t, c) => t + Math.max(0, c.actual - c.nuevo), 0);
+    const mas = cambios.reduce((t, c) => t + Math.max(0, c.nuevo - c.actual), 0);
+    texto += `
+
+En total: ${menos} pieza(s) menos y ${mas} más a la semana.`;
+    if (bruscos.length) {
+      texto += `
+
+⚠️ ${bruscos.length} saltan más de un 40 % y NO se aplican:
+` +
+        ps.textoCambios(bruscos);
+    }
+  }
+  if (sinDato.length) {
+    texto += `
+
+ℹ️ Sin recuento de devoluciones (no se tocan): ${sinDato.slice(0, 8).join('; ')}` +
+      (sinDato.length > 8 ? ` y ${sinDato.length - 8} más` : '');
+  }
 
   for (const chatId of config.adminTelegramIds) {
     try {

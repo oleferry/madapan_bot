@@ -1,5 +1,6 @@
 import * as historico from './historicoVentas';
 import * as ps from './pedidosSemanaService';
+import * as sobrasService from './sobrasService';
 import { log } from '../utils/logger';
 
 // Ajuste semanal de cantidades a partir de lo que de verdad se vende.
@@ -14,7 +15,19 @@ import { log } from '../utils/logger';
 //   sugerido             = venta real × 1,10, redondeado al alza
 //
 // Ese 10 % es el colchón que pidió Madapan: mejor que sobre una barra a que un
-// cliente se quede sin pan a media mañana.
+// cliente se quede sin pan a media mañana. Si de un producto no volvió nada,
+// la venta es todo lo servido y el sugerido sube ese 10 %: es la señal de que
+// pudo haberse vendido más.
+//
+// La comparación es contra el MISMO día de la SEMANA ANTERIOR, no contra una
+// media de meses: así el ajuste sigue a lo que pasa ahora y no arrastra el
+// verano entero.
+//
+// La tienda propia es el caso raro: su albarán no lleva negativos, así que sus
+// devoluciones salen de los recuentos de /sobras. Y ahí hay una diferencia que
+// importa: NO tener recuento no es lo mismo que no haber devuelto nada. Si se
+// tratara igual, cada semana sin contar sobras subiría la producción un 10 %
+// sin que nadie lo pidiera.
 
 export const MARGEN = 1.10;
 
@@ -31,6 +44,15 @@ export interface AjusteProducto {
 function siguienteDia(fecha: string): string {
   const d = new Date(`${fecha}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// Última fecha con ese día de la semana, anterior a la de referencia.
+export function ultimoDiaSemana(hoy: string, dow: number): string {
+  const d = new Date(`${hoy}T12:00:00Z`);
+  do {
+    d.setUTCDate(d.getUTCDate() - 1);
+  } while (d.getUTCDay() !== dow);
   return d.toISOString().slice(0, 10);
 }
 
@@ -80,10 +102,62 @@ export function ventaRealPorDia(
     .sort((a, b) => b.ventaMedia - a.ventaMedia);
 }
 
-// La tienda propia se queda fuera: su albarán NO lleva negativos, así que su
-// "venta real" saldría igual a lo servido y el +10 % inflaría la producción
-// cada semana. Sus sobras vienen de /sobras, por otro camino.
 const TIENDA = process.env['PUNTO_PROPIO'] ?? 'Madapan';
+
+export interface VentaDia {
+  producto: string;
+  sku: string;
+  servido: number;
+  devuelto: number;
+  venta: number;
+  sugerido: number;
+  fecha: string;            // el día concreto del que sale
+  hayDatoDevolucion: boolean;
+}
+
+// Venta de un cliente en el MISMO día de la semana pasada.
+//
+// "hayDatoDevolucion" separa dos cosas que se confunden fácil: que no volviera
+// nada (devuelto 0, sube el 10 %) y que no sepamos si volvió algo. Lo segundo
+// no se toca.
+export function ventaSemanaAnterior(
+  entregas: historico.Entrega[], cliente: string, dow: number, hoy: string
+): VentaDia[] {
+  const fecha = ultimoDiaSemana(hoy, dow);
+  const suyas = entregas.filter(e => e.cliente === cliente);
+  const dia = suyas.find(e => e.fecha === fecha);
+  if (!dia) return [];
+
+  const esTienda = ps.normalizar(cliente) === ps.normalizar(TIENDA);
+
+  // Reparto: la devolución viene en el albarán del día siguiente.
+  // Tienda: viene del recuento de /sobras de ese mismo día.
+  const siguiente = suyas.find(e => e.fecha === siguienteDia(fecha));
+  const recuento = esTienda ? sobrasService.sobrasDe(cliente, fecha) : undefined;
+  const hayDato = esTienda ? Boolean(recuento) : Boolean(siguiente);
+
+  const devueltoPor = new Map<string, number>();
+  if (esTienda) {
+    for (const l of recuento?.lineas ?? []) {
+      devueltoPor.set(l.sku || l.producto, l.cantidad);
+    }
+  } else if (siguiente) {
+    for (const l of historico.devuelto(siguiente)) {
+      devueltoPor.set(l.sku || l.name, (devueltoPor.get(l.sku || l.name) ?? 0) + l.units);
+    }
+  }
+
+  return historico.servido(dia).map(l => {
+    const k = l.sku || l.name;
+    const devuelto = devueltoPor.get(k) ?? devueltoPor.get(l.name) ?? 0;
+    const venta = Math.max(0, l.units - devuelto);
+    return {
+      producto: l.name, sku: l.sku, servido: l.units, devuelto, venta,
+      sugerido: Math.max(0, Math.ceil(venta * MARGEN - 0.001)),
+      fecha, hayDatoDevolucion: hayDato,
+    };
+  }).sort((a, b) => b.venta - a.venta);
+}
 
 export interface RevisionCliente {
   cliente: string;
@@ -91,60 +165,89 @@ export interface RevisionCliente {
   productos: Array<AjusteProducto & { enHoja: number; fila?: number; dia: string }>;
 }
 
-// Compara la venta real con lo que hay puesto en Pedidos_semana y devuelve los
-// cambios que harían falta. Solo se propone lo que se aparta de verdad: mover
-// una cantidad por media unidad es ruido.
-export function revisar(
+// Compara la venta de la semana pasada con lo que hay puesto en la hoja.
+export interface Revision {
+  cambios: ps.Cambio[];
+  bruscos: ps.Cambio[];        // saltos grandes: se listan, no se aplican
+  sinDato: string[];           // días sin recuento de devoluciones
+}
+
+export function revisarSemanaAnterior(
   entregas: historico.Entrega[],
   filas: ps.FilaPedido[],
-  opciones: { desde?: string; minSemanas?: number; minDiferencia?: number } = {}
-): { revisiones: RevisionCliente[]; cambios: ps.Cambio[]; bruscos: ps.Cambio[] } {
-  const minSemanas = opciones.minSemanas ?? 3;
-  const minDiferencia = opciones.minDiferencia ?? 2;
+  hoy: string,
+  opciones: { minDiferencia?: number; saltoMaximo?: number } = {}
+): Revision {
+  const minDiferencia = opciones.minDiferencia ?? 1;
+  const saltoMaximo = opciones.saltoMaximo ?? 0.4;
 
-  const revisiones: RevisionCliente[] = [];
   const cambios: ps.Cambio[] = [];
   const bruscos: ps.Cambio[] = [];
+  const sinDato = new Set<string>();
+
+  const nombres = historico.clientes(entregas).map(c => c.cliente);
 
   for (const punto of ps.puntos(filas)) {
-    if (ps.normalizar(punto) === ps.normalizar(TIENDA)) continue;
-    // El nombre de la hoja y el de Holded no son iguales; se cruza por palabras.
-    const cliente = historico.clientes(entregas)
-      .map(c => c.cliente)
-      .find(c => ps.buscarPunto(filas, c).includes(punto) || emparejan(c, punto));
+    const cliente = nombres.find(c => ps.buscarPunto(filas, c).includes(punto) || emparejan(c, punto));
     if (!cliente) continue;
-
-    const productos: RevisionCliente['productos'] = [];
 
     for (let dow = 0; dow < 7; dow++) {
       const dia = ps.DIAS[dow]!;
-      const reales = ventaRealPorDia(entregas, cliente, dow, opciones.desde);
-      for (const r of reales) {
-        if (r.semanas < minSemanas) continue;
-        const fila = filas.find(f => f.punto === punto && ps.esMismoDia(f.dia, dia)
-          && ps.normalizar(f.producto) === ps.normalizar(r.producto));
-        if (!fila) continue;
-        productos.push({ ...r, enHoja: fila.cantidad, fila: fila.fila, dia });
-        if (Math.abs(fila.cantidad - r.sugerido) >= minDiferencia) {
-          const cambio: ps.Cambio = {
-            fila: fila.fila, punto, dia, producto: fila.producto,
-            actual: fila.cantidad, nuevo: r.sugerido,
-            motivo: `venta real ${r.ventaMedia.toFixed(1)} +10% (${r.semanas} sem)`,
-          };
-          // Un salto de más del 40 % no se propone para aplicar a ciegas: casi
-          // siempre es un cliente que cerró unos días o una devolución rara,
-          // no un cambio de verdad en lo que vende.
-          const salto = fila.cantidad > 0
-            ? Math.abs(fila.cantidad - r.sugerido) / fila.cantidad : 1;
-          (salto > 0.4 ? bruscos : cambios).push(cambio);
+      for (const v of ventaSemanaAnterior(entregas, cliente, dow, hoy)) {
+        if (!v.hayDatoDevolucion) {
+          // Sin saber si volvió algo, subir un 10 % sería inventar.
+          sinDato.add(`${punto} — ${dia} (${v.fecha})`);
+          continue;
         }
+        const fila = filas.find(f => f.punto === punto && ps.esMismoDia(f.dia, dia)
+          && ps.normalizar(f.producto) === ps.normalizar(v.producto));
+        if (!fila || Math.abs(fila.cantidad - v.sugerido) < minDiferencia) continue;
+
+        const cambio: ps.Cambio = {
+          fila: fila.fila, punto, dia, producto: fila.producto,
+          actual: fila.cantidad, nuevo: v.sugerido,
+          motivo: `${v.fecha}: sirvió ${v.servido}, volvieron ${v.devuelto}`,
+        };
+        const salto = fila.cantidad > 0
+          ? Math.abs(fila.cantidad - v.sugerido) / fila.cantidad : 1;
+        (salto > saltoMaximo ? bruscos : cambios).push(cambio);
       }
     }
-    if (productos.length) revisiones.push({ cliente, punto, productos });
   }
+  log('AjusteSemanal', `${cambios.length} cambios, ${bruscos.length} bruscos, ${sinDato.size} sin dato`);
+  return { cambios, bruscos, sinDato: [...sinDato] };
+}
 
-  log('AjusteSemanal', `${revisiones.length} clientes, ${cambios.length} cambios, ${bruscos.length} para revisar`);
-  return { revisiones, cambios, bruscos };
+// Cómo quedaría Pedidos_semana si se aplicaran los cambios: la hoja entera,
+// no solo el diff. Es lo que hay que poder mirar antes de escribir.
+export function previsualizar(filas: ps.FilaPedido[], cambios: ps.Cambio[]): string {
+  const nuevoPorFila = new Map(cambios.map(c => [c.fila, c.nuevo]));
+  const porPunto = new Map<string, ps.FilaPedido[]>();
+  for (const f of filas) porPunto.set(f.punto, [...(porPunto.get(f.punto) ?? []), f]);
+
+  let txt = '';
+  for (const [punto, suyas] of porPunto) {
+    const tocadas = suyas.filter(f => nuevoPorFila.has(f.fila));
+    if (!tocadas.length) continue;
+
+    txt += `
+— ${punto} —
+`;
+    const productos = [...new Set(suyas.map(f => f.producto))];
+    txt += '   ' + 'producto'.padEnd(22) + ps.DIAS.map(d => d.slice(0, 3).padStart(6)).join('') + '\n';
+    for (const prod of productos) {
+      const celdas = ps.DIAS.map(d => {
+        const f = suyas.find(x => x.producto === prod && ps.esMismoDia(x.dia, d));
+        if (!f) return '     ·';
+        const nuevo = nuevoPorFila.get(f.fila);
+        return (nuevo === undefined ? String(f.cantidad) : `${f.cantidad}→${nuevo}`).padStart(6);
+      });
+      // Solo los productos que cambian en algún día: lo demás es ruido.
+      if (!celdas.some(c => c.includes('→'))) continue;
+      txt += '   ' + prod.slice(0, 21).padEnd(22) + celdas.join('') + '\n';
+    }
+  }
+  return txt.trim() || 'No cambia ninguna celda.';
 }
 
 function emparejan(a: string, b: string): boolean {
