@@ -33,7 +33,7 @@ export function scheduleAjusteSemanal(bot: Telegraf<never>): void {
 
 // Recibe el "telegram" y no el bot entero: así vale igual desde el cron que
 // desde un comando, donde solo hay ctx.telegram.
-export async function revisarYAvisar(telegram: Telegram): Promise<string> {
+export async function revisarYAvisar(telegram: Telegram, detalle = false): Promise<string> {
   const hoy = format(toZonedTime(new Date(), config.timezone), 'yyyy-MM-dd', { timeZone: config.timezone });
 
   // Se fuerza la descarga: la revisión mira los albaranes de esta semana, no
@@ -63,11 +63,16 @@ export async function revisarYAvisar(telegram: Telegram): Promise<string> {
 
 En total: ${menos} pieza(s) menos y ${mas} más a la semana.`;
     if (bruscos.length) {
+      // No se listan uno a uno: son pedidos puntuales que se salen de lo
+      // normal (una comunión, un encargo grande), no la base semanal. Verlos
+      // enteros cada semana es ruido; lo útil es saber que están ahí.
+      const puntos = [...new Set(bruscos.map(c => c.punto.split(/[-(]/)[0]!.trim()))];
       texto += `
 
-⚠️ ${bruscos.length} saltan más de un 40 % y NO se aplican:
-` +
-        ps.textoCambios(bruscos);
+⚠️ ${bruscos.length} día(s) con pedidos fuera de lo normal, no se tocan: ` +
+        puntos.slice(0, 6).join(', ') + (puntos.length > 6 ? ` y ${puntos.length - 6} más` : '') +
+        '.\nSon puntuales, no la base semanal. Para verlos: /revisar_ventas detalle';
+      if (detalle) texto += '\n\n' + ps.textoCambios(bruscos);
     }
   }
   if (sinDato.length) {

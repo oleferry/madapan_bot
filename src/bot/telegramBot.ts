@@ -388,7 +388,7 @@ export function createBot(): Telegraf<BotContext> {
     if (!isStaff(ctx)) return;
     await ctx.reply('Bajando los albaranes y calculando la venta real...');
     try {
-      await revisarYAvisar(ctx.telegram);
+      await revisarYAvisar(ctx.telegram, /detalle/i.test(ctx.message.text));
     } catch (err) {
       error('TelegramBot', `/revisar_ventas failed: ${(err as Error).message}`);
       await ctx.reply(`Error: ${(err as Error).message}`);
