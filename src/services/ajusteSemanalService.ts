@@ -22,6 +22,10 @@ import { log } from '../utils/logger';
 // la venta es todo lo servido y el sugerido sube ese 10 %: es la señal de que
 // pudo haberse vendido más.
 //
+// El redondeo es al MÁS CERCANO, no al alza. Redondear siempre arriba en cada
+// una de las 362 celdas añadía otras 150 piezas por semana: el colchón del
+// 10 % acababa siendo del 17 % sin que nadie lo hubiera decidido.
+//
 // La comparación es contra el MISMO día de la SEMANA ANTERIOR, no contra una
 // media de meses: así el ajuste sigue a lo que pasa ahora y no arrastra el
 // verano entero.
@@ -106,7 +110,7 @@ export function ventaRealPorDia(
       const ventaMedia = Math.max(0, servidoMedio - devueltoMedio);
       return {
         producto: v.producto, sku: v.sku, servidoMedio, devueltoMedio, ventaMedia,
-        sugerido: Math.max(0, Math.ceil(ventaMedia * MARGEN - 0.001)),
+        sugerido: Math.max(0, Math.round(ventaMedia * MARGEN)),
         semanas,
       };
     })
@@ -172,7 +176,7 @@ export function ventaSemanaAnterior(
       return {
         producto: l.name, sku: l.sku, servido: l.units,
         devuelto: Math.max(0, l.units - venta), venta,
-        sugerido: Math.max(0, Math.ceil(venta * MARGEN - 0.001)),
+        sugerido: Math.max(0, Math.round(venta * MARGEN)),
         fecha, hayDatoDevolucion: true,
       };
     }
@@ -180,7 +184,7 @@ export function ventaSemanaAnterior(
     const venta = Math.max(0, l.units - devuelto);
     return {
       producto: l.name, sku: l.sku, servido: l.units, devuelto, venta,
-      sugerido: Math.max(0, Math.ceil(venta * MARGEN - 0.001)),
+      sugerido: Math.max(0, Math.round(venta * MARGEN)),
       fecha, hayDatoDevolucion: hayDato,
     };
   }).sort((a, b) => b.venta - a.venta);

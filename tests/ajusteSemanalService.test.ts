@@ -29,8 +29,9 @@ describe('venta real a partir de las devoluciones', () => {
     expect(lunes.servidoMedio).toBe(20);
     expect(lunes.devueltoMedio).toBe(6);
     expect(lunes.ventaMedia).toBe(14);
-    // 14 × 1,10 = 15,4 → 16
-    expect(lunes.sugerido).toBe(16);
+    // 14 × 1,10 = 15,4 → 15. Se redondea al más cercano, no al alza: hacerlo
+    // hacia arriba en cada celda convertía el colchón del 10 % en un 17 %.
+    expect(lunes.sugerido).toBe(15);
   });
 
   it('el martes no carga con la devolución que le llega ese día', () => {
