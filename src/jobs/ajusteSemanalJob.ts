@@ -47,7 +47,15 @@ export async function revisarYAvisar(telegram: Telegram, detalle = false): Promi
   hace10.setUTCDate(hace10.getUTCDate() - 10);
   const ventasMostrador = await tickets.ventasDesde(hace10.toISOString().slice(0, 10));
 
-  const { cambios, bruscos, sinDato } = aj.revisarSemanaAnterior(entregas, filas, hoy, { ventasMostrador });
+  // Un cliente que no devolvió nada en dos meses tiene pedido fijo: se le
+  // sirve lo mismo cada día y lo vende. Ajustarle la cantidad por lo de una
+  // semana es meterse donde no toca, y fue el fallo del primer día de uso.
+  const haceDosMeses = new Date(`${hoy}T12:00:00Z`);
+  haceDosMeses.setUTCDate(haceDosMeses.getUTCDate() - 60);
+  const fijos = aj.clientesFijos(entregas, haceDosMeses.toISOString().slice(0, 10));
+
+  const { cambios, bruscos, sinDato, fijos: fijosTocados } =
+    aj.revisarSemanaAnterior(entregas, filas, hoy, { ventasMostrador, fijos });
 
   propuesta = cambios.length ? { cambios, generadaEl: hoy } : null;
 
@@ -74,6 +82,13 @@ En total: ${menos} pieza(s) menos y ${mas} más a la semana.`;
         '.\nSon puntuales, no la base semanal. Para verlos: /revisar_ventas detalle';
       if (detalle) texto += '\n\n' + ps.textoCambios(bruscos);
     }
+  }
+  if (fijosTocados.length) {
+    texto += `
+
+🔒 Pedido fijo, no se tocan (nunca devuelven nada): ` +
+      fijosTocados.map(p => p.split(/[-(]/)[0]!.trim()).slice(0, 8).join(', ') +
+      (fijosTocados.length > 8 ? ` y ${fijosTocados.length - 8} más` : '');
   }
   if (sinDato.length) {
     texto += `

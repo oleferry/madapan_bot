@@ -187,6 +187,29 @@ export interface Revision {
   cambios: ps.Cambio[];
   bruscos: ps.Cambio[];        // saltos grandes: se listan, no se aplican
   sinDato: string[];           // días sin recuento de devoluciones
+  fijos: string[];             // clientes de pedido fijo, intocados
+}
+
+// Clientes de pedido fijo: los que nunca devuelven nada. Un bar o una
+// residencia piden lo mismo cada día y lo venden todo, así que ajustarles la
+// cantidad por la venta de una semana es meterse donde no toca. Se detectan
+// solos: cero devoluciones en el periodo mirado.
+//
+// La tienda propia es la excepción: tampoco tiene devoluciones en el albarán,
+// pero no porque lo venda todo, sino porque las suyas están en los tickets.
+export function clientesFijos(entregas: historico.Entrega[], desde: string): Set<string> {
+  const servido = new Map<string, number>();
+  const devuelto = new Map<string, number>();
+  for (const e of entregas.filter(x => x.fecha >= desde)) {
+    servido.set(e.cliente, (servido.get(e.cliente) ?? 0) + historico.servido(e).reduce((t, l) => t + l.units, 0));
+    devuelto.set(e.cliente, (devuelto.get(e.cliente) ?? 0) + historico.devuelto(e).reduce((t, l) => t + l.units, 0));
+  }
+  const fijos = new Set<string>();
+  for (const [cliente, s] of servido) {
+    if (ps.normalizar(cliente) === ps.normalizar(TIENDA)) continue;
+    if (s > 0 && (devuelto.get(cliente) ?? 0) === 0) fijos.add(cliente);
+  }
+  return fijos;
 }
 
 export function revisarSemanaAnterior(
@@ -197,6 +220,7 @@ export function revisarSemanaAnterior(
     minDiferencia?: number;
     saltoMaximo?: number;
     ventasMostrador?: Map<string, tickets.VentaMostrador>;
+    fijos?: Set<string>;
   } = {}
 ): Revision {
   const minDiferencia = opciones.minDiferencia ?? 1;
@@ -205,12 +229,16 @@ export function revisarSemanaAnterior(
   const cambios: ps.Cambio[] = [];
   const bruscos: ps.Cambio[] = [];
   const sinDato = new Set<string>();
+  const fijosTocados = new Set<string>();
+  const fijos = opciones.fijos ?? new Set<string>();
 
   const nombres = historico.clientes(entregas).map(c => c.cliente);
+  const { mapa } = emparejarPuntos(ps.puntos(filas), nombres);
 
   for (const punto of ps.puntos(filas)) {
-    const cliente = nombres.find(c => ps.buscarPunto(filas, c).includes(punto) || emparejan(c, punto));
+    const cliente = mapa.get(punto);
     if (!cliente) continue;
+    if (fijos.has(cliente)) { fijosTocados.add(punto); continue; }
 
     for (let dow = 0; dow < 7; dow++) {
       const dia = ps.DIAS[dow]!;
@@ -235,8 +263,9 @@ export function revisarSemanaAnterior(
       }
     }
   }
-  log('AjusteSemanal', `${cambios.length} cambios, ${bruscos.length} bruscos, ${sinDato.size} sin dato`);
-  return { cambios, bruscos, sinDato: [...sinDato] };
+  log('AjusteSemanal', `${cambios.length} cambios, ${bruscos.length} bruscos, ` +
+    `${sinDato.size} sin dato, ${fijosTocados.size} de pedido fijo`);
+  return { cambios, bruscos, sinDato: [...sinDato], fijos: [...fijosTocados] };
 }
 
 // Cómo quedaría Pedidos_semana si se aplicaran los cambios: la hoja entera,
@@ -271,10 +300,49 @@ export function previsualizar(filas: ps.FilaPedido[], cambios: ps.Cambio[]): str
   return txt.trim() || 'No cambia ninguna celda.';
 }
 
-function emparejan(a: string, b: string): boolean {
-  const pa = new Set(ps.palabras(a));
-  const pb = ps.palabras(b);
-  return pb.length > 0 && pb.some(p => pa.has(p) && p.length > 4);
+// Empareja los puntos de la hoja con los clientes de Holded.
+//
+// Antes bastaba una palabra larga en común, y eso emparejó "RESTAURANTE EL
+// ARCO - ÁNGEL LÓPEZ GARCÍA" con "Mariano Jorge Esteban García": "garcia" la
+// comparten media docena de clientes. Se le aplicaron a un cliente las ventas
+// de otro.
+//
+// Ahora solo cuentan las palabras DISTINTIVAS —las que aparecen en uno o dos
+// nombres de toda la lista— y hace falta un ganador claro. Sin eso, el punto
+// se queda sin emparejar, que es mucho mejor que emparejarlo mal.
+export function emparejarPuntos(
+  puntos: string[], clientes: string[]
+): { mapa: Map<string, string>; ambiguos: string[] } {
+  const frecuencia = new Map<string, number>();
+  for (const c of clientes) {
+    for (const p of new Set(ps.palabras(c))) {
+      frecuencia.set(p, (frecuencia.get(p) ?? 0) + 1);
+    }
+  }
+  const distintiva = (p: string): boolean => (frecuencia.get(p) ?? 0) <= 2;
+
+  const mapa = new Map<string, string>();
+  const ambiguos: string[] = [];
+
+  for (const punto of puntos) {
+    const suyas = new Set(ps.palabras(punto));
+    const puntuados = clientes
+      .map(c => ({
+        cliente: c,
+        puntos: ps.palabras(c).filter(p => suyas.has(p) && distintiva(p)).length,
+      }))
+      .filter(x => x.puntos > 0)
+      .sort((a, b) => b.puntos - a.puntos);
+
+    if (!puntuados.length) continue;
+    // Empate en la primera posición: no se elige a ojo.
+    if (puntuados.length > 1 && puntuados[1]!.puntos === puntuados[0]!.puntos) {
+      ambiguos.push(`${punto} → ${puntuados.slice(0, 3).map(x => x.cliente).join(' / ')}`);
+      continue;
+    }
+    mapa.set(punto, puntuados[0]!.cliente);
+  }
+  return { mapa, ambiguos };
 }
 
 export function textoRevision(
