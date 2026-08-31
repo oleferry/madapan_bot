@@ -299,6 +299,7 @@ export function revisarSemanaAnterior(
     saltoMaximo?: number;
     ventasMostrador?: Map<string, tickets.VentaMostrador>;
     fijos?: Set<string>;
+    skus?: Map<string, string>;
   } = {}
 ): Revision {
   const minDiferencia = opciones.minDiferencia ?? 1;
@@ -327,7 +328,7 @@ export function revisarSemanaAnterior(
           continue;
         }
         const fila = filas.find(f => f.punto === punto && ps.esMismoDia(f.dia, dia)
-          && ps.normalizar(f.producto) === ps.normalizar(v.producto));
+          && ps.mismoProducto(f.producto, v.sku, v.producto, opciones.skus));
         if (!fila || Math.abs(fila.cantidad - v.sugerido) < minDiferencia) continue;
 
         const cambio: ps.Cambio = {

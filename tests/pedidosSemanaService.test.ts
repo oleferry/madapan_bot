@@ -107,3 +107,23 @@ describe('construir el plan de cambios', () => {
     expect(celdas).toEqual([{ range: 'Pedidos_semana!D148', value: '4' }]);
   });
 });
+
+describe('el mismo producto con dos nombres', () => {
+  // SKU69 es "Pan pequeño" en la hoja y "Pan de cuadros pequeño" en los
+  // albaranes de Holded. Comparando por nombre, todo lo servido bajo el otro
+  // nombre se quedaba fuera del cálculo.
+  const skus = new Map([['pan pequeno', 'SKU69'], ['barra', 'SKU06']]);
+
+  it('empareja por SKU aunque el nombre no coincida', () => {
+    expect(ps.mismoProducto('Pan pequeño', 'SKU69', 'Pan de cuadros pequeño', skus)).toBe(true);
+  });
+
+  it('no empareja dos productos distintos aunque se parezcan de nombre', () => {
+    expect(ps.mismoProducto('Pan pequeño', 'SKU63', 'Pan de cuadros', skus)).toBe(false);
+  });
+
+  it('sin SKU conocido, cae al nombre', () => {
+    expect(ps.mismoProducto('Chapata', '', 'Chapata')).toBe(true);
+    expect(ps.mismoProducto('Chapata', '', 'Hogaza')).toBe(false);
+  });
+});

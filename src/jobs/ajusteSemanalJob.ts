@@ -54,8 +54,12 @@ export async function revisarYAvisar(telegram: Telegram, detalle = false): Promi
   haceDosMeses.setUTCDate(haceDosMeses.getUTCDate() - 60);
   const fijos = aj.clientesFijos(entregas, haceDosMeses.toISOString().slice(0, 10));
 
+  // El mismo producto se llama distinto en la hoja y en Holded (SKU69 es
+  // "Pan pequeño" y "Pan de cuadros pequeño"): se cruza por SKU.
+  const skus = await ps.skusPorProducto();
+
   const { cambios, bruscos, sinDato, fijos: fijosTocados } =
-    aj.revisarSemanaAnterior(entregas, filas, hoy, { ventasMostrador, fijos });
+    aj.revisarSemanaAnterior(entregas, filas, hoy, { ventasMostrador, fijos, skus });
 
   propuesta = cambios.length ? { cambios, generadaEl: hoy } : null;
 

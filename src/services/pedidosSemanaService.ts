@@ -156,3 +156,36 @@ export function textoCambios(cambios: Cambio[]): string {
   }
   return txt.trimEnd();
 }
+
+// ── Productos y sus SKU ───────────────────────────────────────────────────────
+
+// El mismo producto tiene distinto nombre en la hoja y en Holded: SKU69 es
+// "Pan pequeño" en Maestros y "Pan de cuadros pequeño" en los albaranes.
+// Comparar por nombre dejaba fuera del cálculo todo lo servido bajo el otro
+// nombre. El SKU es lo único que no cambia.
+let cacheSkus: Map<string, string> | null = null;
+
+export async function skusPorProducto(): Promise<Map<string, string>> {
+  if (cacheSkus) return cacheSkus;
+  const filas = await sheetsClient.readRange('Maestros!A2:H60');
+  const m = new Map<string, string>();
+  for (const r of filas) {
+    const nombre = (r[1] ?? '').trim();
+    const sku = (r[7] ?? '').trim();
+    if (nombre && sku) m.set(normalizar(nombre), sku);
+  }
+  cacheSkus = m;
+  log('PedidosSemana', `${m.size} productos con SKU en Maestros`);
+  return m;
+}
+
+// ¿Son el mismo producto? Por SKU si se conoce; si no, por nombre.
+export function mismoProducto(
+  nombreHoja: string, skuLinea: string, nombreLinea: string, skus?: Map<string, string>
+): boolean {
+  const skuHoja = skus?.get(normalizar(nombreHoja));
+  if (skuHoja && skuLinea) return skuHoja === skuLinea;
+  return normalizar(nombreHoja) === normalizar(nombreLinea);
+}
+
+export function _resetSkus(): void { cacheSkus = null; }
