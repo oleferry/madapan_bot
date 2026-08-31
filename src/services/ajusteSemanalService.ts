@@ -48,6 +48,19 @@ export interface AjusteProducto {
   semanas: number;          // sobre cuántas semanas se calcula
 }
 
+// El albarán lleva la fecha del día ANTERIOR a la entrega: se genera de
+// madrugada, antes de salir a repartir. Comprobado contra la hoja: el albarán
+// del viernes 28/08 lleva 70 panes de cuadros, que es la cantidad del SÁBADO.
+//
+// De ahí salen las dos reglas:
+//   lo servido el martes  → albarán fechado el LUNES
+//   lo que sobró el martes → albarán fechado el MARTES (el siguiente)
+function diaAnterior(fecha: string): string {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function siguienteDia(fecha: string): string {
   const d = new Date(`${fecha}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 1);
@@ -71,7 +84,9 @@ export function ultimoDiaSemana(hoy: string, dow: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Venta real por producto de un cliente en un día de la semana.
+// Venta media por día de la semana. Ojo: esta función mira las fechas de
+// albarán tal cual, sin el desplazamiento de un día. Se mantiene porque la usa
+// /ajuste, que compara medias, no días concretos.
 export function ventaRealPorDia(
   entregas: historico.Entrega[], cliente: string, dow: number, desde?: string
 ): AjusteProducto[] {
@@ -135,13 +150,25 @@ export interface VentaDia {
 // "hayDatoDevolucion" separa dos cosas que se confunden fácil: que no volviera
 // nada (devuelto 0, sube el 10 %) y que no sepamos si volvió algo. Lo segundo
 // no se toca.
+// Los tickets del último día o dos llegan incompletos: el TPV cierra la caja
+// más tarde. Medido: el domingo 30/08 daba 9 panes de cuadros cuando el
+// domingo anterior dio 36. Usarlos daría una venta falsa y una bajada enorme.
+const DIAS_FIABLES = 2;
+
+function diasDesde(fecha: string, hoy: string): number {
+  return Math.round(
+    (Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${fecha}T00:00:00Z`)) / 86400000
+  );
+}
+
 export function ventaSemanaAnterior(
   entregas: historico.Entrega[], cliente: string, dow: number, hoy: string,
   ventasMostrador?: Map<string, tickets.VentaMostrador>
 ): VentaDia[] {
+  // fecha = el día de ENTREGA; su albarán lleva la fecha del día anterior.
   const fecha = ultimoDiaSemana(hoy, dow);
   const suyas = entregas.filter(e => e.cliente === cliente);
-  const dia = suyas.find(e => e.fecha === fecha);
+  const dia = suyas.find(e => e.fecha === diaAnterior(fecha));
   if (!dia) return [];
 
   const esTienda = ps.normalizar(cliente) === ps.normalizar(TIENDA);
@@ -149,8 +176,12 @@ export function ventaSemanaAnterior(
   // Tienda: lo mejor es el ticket, que dice lo VENDIDO sin que nadie cuente
   // nada. Si ese día no hay tickets, se cae al recuento de /sobras.
   // Reparto: la devolución viene en el albarán del día siguiente.
-  const siguiente = suyas.find(e => e.fecha === siguienteDia(fecha));
-  const delMostrador = esTienda ? ventasMostrador?.get(fecha) : undefined;
+  // Las sobras de la entrega del martes van en el albarán fechado el martes,
+  // que es el documento de la entrega del miércoles.
+  const siguiente = suyas.find(e => e.fecha === fecha);
+  const delMostrador = esTienda && diasDesde(fecha, hoy) >= DIAS_FIABLES
+    ? ventasMostrador?.get(fecha)
+    : undefined;
   const recuento = esTienda && !delMostrador ? sobrasService.sobrasDe(cliente, fecha) : undefined;
   const hayDato = esTienda
     ? Boolean(delMostrador) || Boolean(recuento)

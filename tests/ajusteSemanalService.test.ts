@@ -1,4 +1,4 @@
-import { ventaRealPorDia } from '../src/services/ajusteSemanalService';
+import { ventaRealPorDia, ventaSemanaAnterior } from '../src/services/ajusteSemanalService';
 import { Entrega } from '../src/services/historicoVentas';
 
 // Lunes: se sirven 20 barras. Martes: albarán con la entrega del martes MÁS
@@ -72,5 +72,39 @@ describe('venta real a partir de las devoluciones', () => {
   it('cuenta las semanas de las que hay dato', () => {
     const e = [...semana('2026-08-03', 20, 6), ...semana('2026-08-10', 20, 6)];
     expect(ventaRealPorDia(e, 'El Arco', 1)[0]!.semanas).toBe(2);
+  });
+});
+
+describe('el albarán va fechado el día anterior a la entrega', () => {
+  // Comprobado contra la hoja: el albarán del viernes 28/08 lleva 70 panes,
+  // que es la cantidad del SÁBADO. Se genera de madrugada, antes de repartir.
+  const entregas: Entrega[] = [
+    // Albarán del viernes 28 → entrega del sábado 29: 70 piezas.
+    { fecha: '2026-08-28', contactId: 'c1', cliente: 'El Arco',
+      lineas: [{ sku: 'SKU63', name: 'Pan de cuadros', units: 70 }] },
+    // Albarán del sábado 29 → entrega del domingo, y las sobras del sábado.
+    { fecha: '2026-08-29', contactId: 'c1', cliente: 'El Arco',
+      lineas: [
+        { sku: 'SKU63', name: 'Pan de cuadros', units: 70 },
+        { sku: 'SKU63', name: 'Pan de cuadros', units: -10 },
+      ] },
+  ];
+
+  it('lo servido el sábado sale del albarán del viernes', () => {
+    // dow 6 = sábado. Referencia: lunes 31, así que el sábado es el 29.
+    const v = ventaSemanaAnterior(entregas, 'El Arco', 6, '2026-08-31')[0]!;
+    expect(v.servido).toBe(70);
+    // Y las sobras del sábado están en el albarán fechado el sábado.
+    expect(v.devuelto).toBe(10);
+    expect(v.venta).toBe(60);
+    expect(v.sugerido).toBe(66);   // 60 × 1,10
+  });
+
+  it('no confunde el día de la entrega con la fecha del documento', () => {
+    // Si se leyera el albarán del sábado como "lo servido el sábado", la
+    // devolución de ese mismo día se restaría del día equivocado.
+    const domingo = ventaSemanaAnterior(entregas, 'El Arco', 0, '2026-08-31');
+    expect(domingo).toHaveLength(1);
+    expect(domingo[0]!.servido).toBe(70);   // del albarán del sábado
   });
 });
