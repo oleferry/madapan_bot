@@ -53,6 +53,7 @@ export const config = {
   pagosPath: process.env['PAGOS_PATH'] ?? persistPath('pizza-pagos.json', 'data/pizza-pagos.json'),
   sobrasPath: process.env['SOBRAS_PATH'] ?? persistPath('sobras.json', 'data/sobras.json'),
   revertirPath: process.env['REVERTIR_PATH'] ?? persistPath('revertir.json', 'data/revertir.json'),
+  penasPath: process.env['PENAS_PATH'] ?? persistPath('penas.json', 'data/penas.json'),
   comprasPath: process.env['COMPRAS_PATH'] ?? persistPath('compras.json', 'data/compras.json'),
   // Día de la semana del borrador de pedidos a proveedor (3 = miércoles).
   // El borrador es quincenal; el job mira si han pasado 13 días.

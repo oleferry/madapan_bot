@@ -34,7 +34,10 @@ export interface SessionData {
     | 'cmp_awaiting_prov'
     | 'sb_awaiting_cantidad'
     | 'sb_awaiting_producto'
-    | 'ins_awaiting_texto';
+    | 'ins_awaiting_texto'
+    | 'pena_awaiting_nombre'
+    | 'pena_awaiting_telefono'
+    | 'pena_awaiting_cantidad';
   isAdmin?: boolean;
   pizzaOrder?: import('./pizzaFlow').PizzaSessionData;
   encargo?: import('./encargoFlow').EncargoSessionData;
@@ -42,6 +45,7 @@ export interface SessionData {
   compra?: import('./compraFlow').CompraSessionData;
   sobra?: import('./sobraFlow').SobraSessionData;
   instruccion?: import('./instruccionFlow').InstruccionSessionData;
+  pena?: import('./penaFlow').PenaSessionData;
   selectedDate?: string;
   selectedOrderId?: string;
   selectedLineId?: string;
@@ -160,6 +164,7 @@ async function sendWelcomeMenu(ctx: BotContext): Promise<void> {
   await ctx.reply(
     'Hola! Soy el bot de Madapan 🥖\n\n¿Qué deseas hacer?',
     Markup.inlineKeyboard([
+      [Markup.button.callback('🎪 Pedido de peña para las fiestas', 'start_penas')],
       [Markup.button.callback('🍕 Reservar pizza de fin de semana', 'start_pizza')],
       [Markup.button.callback('❌ Cancelar mi reserva de pizza', 'pz_cancel_mine')],
       [Markup.button.callback('🥖 Ya soy cliente de Madapan', 'identify_client')],

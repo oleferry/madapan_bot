@@ -113,6 +113,20 @@ import {
   handlePendientes,
 } from './instruccionFlow';
 import {
+  handlePenaStart,
+  handlePenaDia,
+  handlePenaDias,
+  handlePenaCategoria,
+  handlePenaCategorias,
+  handlePenaProducto,
+  handlePenaCantidad,
+  handlePenaCantidadManual,
+  handlePenaFin,
+  handlePenaConfirmar,
+  handlePenasResumen,
+  handlePenaText,
+} from './penaFlow';
+import {
   handleFoto,
   handleDocumento,
   handleProcesar,
@@ -184,6 +198,12 @@ export function createBot(): Telegraf<BotContext> {
     const payload = (ctx as unknown as { startPayload?: string }).startPayload;
     if (payload === 'pizza') {
       await handlePizzaStart(ctx);
+      return;
+    }
+    // t.me/<bot>?start=penas → entra directo al pedido de peñas. Es el enlace
+    // que se comparte por redes en fiestas.
+    if (payload === 'penas' || payload === 'peñas' || payload === 'fiestas') {
+      await handlePenaStart(ctx);
       return;
     }
     await handleStart(ctx);
@@ -401,6 +421,16 @@ export function createBot(): Telegraf<BotContext> {
     await handlePendientes(ctx);
   });
 
+  // Peñas — pedido de fiestas, público
+  bot.command('penas', handlePenaStart);
+  bot.command('peñas', handlePenaStart);
+
+  // Resumen de los pedidos de peñas (staff)
+  bot.command('pedidos_penas', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await handlePenasResumen(ctx);
+  });
+
   // Pizzas — reserva pública, abierta a cualquier usuario
   bot.command('pizza', handlePizzaStart);
 
@@ -473,6 +503,7 @@ export function createBot(): Telegraf<BotContext> {
   const publicCommands = [
     { command: 'hola', description: 'Iniciar / menú principal' },
     { command: 'pizza', description: 'Reservar pizza de fin de semana' },
+    { command: 'penas', description: 'Pedido de peñas para las fiestas' },
     { command: 'cancelar_pizza', description: 'Cancelar mi reserva de pizza' },
     { command: 'admin', description: 'Ver mi chat ID' },
   ];
@@ -486,6 +517,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'pizzas_dia_extra', description: 'Abrir un día puntual de pizza (staff)' },
     { command: 'pizzas_dia_extra_quitar', description: 'Quitar un día puntual de pizza (staff)' },
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
+    { command: 'pedidos_penas', description: 'Ver los pedidos de peñas (staff)' },
     { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },
     { command: 'encargos', description: 'Encargos de los próximos 3 días (staff)' },
@@ -529,6 +561,12 @@ export function createBot(): Telegraf<BotContext> {
 
       if (data === 'main_menu') {
         await handleMainMenu(ctx);
+        return;
+      }
+
+      // start_penas — botón del menú de bienvenida (público)
+      if (data === 'start_penas') {
+        await handlePenaStart(ctx);
         return;
       }
 
@@ -718,6 +756,30 @@ export function createBot(): Telegraf<BotContext> {
       // admin_produccion — botón del menú admin (solo producción)
       if (data === 'admin_produccion') {
         await sendProduccion(ctx);
+        return;
+      }
+
+      // pn_* — pedido de peñas (público)
+      if (data === 'pn_dias') { await handlePenaDias(ctx); return; }
+      if (data === 'pn_cats') { await handlePenaCategorias(ctx); return; }
+      if (data === 'pn_fin') { await handlePenaFin(ctx); return; }
+      if (data === 'pn_ok') { await handlePenaConfirmar(ctx); return; }
+      if (data === 'pn_manual') { await handlePenaCantidadManual(ctx); return; }
+      if (data.startsWith('pn_dia|')) {
+        await handlePenaDia(ctx, data.split('|')[1]!);
+        return;
+      }
+      if (data.startsWith('pn_cat|')) {
+        await handlePenaCategoria(ctx, parseInt(data.split('|')[1]!, 10));
+        return;
+      }
+      if (data.startsWith('pn_prod|')) {
+        const p = data.split('|');
+        await handlePenaProducto(ctx, parseInt(p[1]!, 10), parseInt(p[2]!, 10));
+        return;
+      }
+      if (data.startsWith('pn_cant|')) {
+        await handlePenaCantidad(ctx, parseInt(data.split('|')[1]!, 10));
         return;
       }
 
@@ -1088,6 +1150,7 @@ export function createBot(): Telegraf<BotContext> {
 
   // ── Text messages ───────────────────────────────────────────────────────────
   bot.on('text', async (ctx) => {
+    if (await handlePenaText(ctx)) return;
     if (await handleInstruccionText(ctx)) return;
     if (await handleSobraText(ctx)) return;
     if (await handleCompraText(ctx)) return;
