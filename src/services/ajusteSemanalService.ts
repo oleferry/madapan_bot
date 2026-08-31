@@ -48,6 +48,14 @@ function siguienteDia(fecha: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+// ps.DIAS empieza en lunes; JavaScript numera la semana empezando en domingo.
+// Mezclarlos corría todo un día: a la fila del lunes se le aplicaban las
+// ventas del domingo. Toda conversión entre índice de DIAS y día JS pasa por
+// aquí.
+export function diaJs(indiceDia: number): number {
+  return (indiceDia + 1) % 7;
+}
+
 // Última fecha con ese día de la semana, anterior a la de referencia.
 export function ultimoDiaSemana(hoy: string, dow: number): string {
   const d = new Date(`${hoy}T12:00:00Z`);
@@ -240,9 +248,9 @@ export function revisarSemanaAnterior(
     if (!cliente) continue;
     if (fijos.has(cliente)) { fijosTocados.add(punto); continue; }
 
-    for (let dow = 0; dow < 7; dow++) {
-      const dia = ps.DIAS[dow]!;
-      for (const v of ventaSemanaAnterior(entregas, cliente, dow, hoy, opciones.ventasMostrador)) {
+    for (let i = 0; i < 7; i++) {
+      const dia = ps.DIAS[i]!;
+      for (const v of ventaSemanaAnterior(entregas, cliente, diaJs(i), hoy, opciones.ventasMostrador)) {
         if (!v.hayDatoDevolucion) {
           // Sin saber si volvió algo, subir un 10 % sería inventar.
           sinDato.add(`${punto} — ${dia} (${v.fecha})`);
