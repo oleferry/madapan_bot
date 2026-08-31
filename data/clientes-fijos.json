@@ -1,0 +1,11 @@
+{
+  "_nota": "Clientes de pedido fijo: se les sirve lo mismo cada día y lo venden. El ajuste semanal por ventas NUNCA les toca la cantidad. Basta con una palabra que los identifique; se compara sin tildes ni mayúsculas, contra el nombre del punto en la hoja y contra el del cliente en Holded.",
+  "_ojo": "La Panera está aquí por decisión de Madapan, aunque en sus albaranes figure un 19 % de devoluciones. Si esos negativos resultan ser reales, habrá que sacarla de esta lista.",
+  "fijos": [
+    "EL ARCO",
+    "SAN LAZARO",
+    "LA PANERA",
+    "BERRUECES",
+    "RIA DE VIGO"
+  ]
+}

@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as historico from './historicoVentas';
 import * as ps from './pedidosSemanaService';
 import * as sobrasService from './sobrasService';
@@ -198,7 +200,40 @@ export interface Revision {
   fijos: string[];             // clientes de pedido fijo, intocados
 }
 
-// Clientes de pedido fijo: los que nunca devuelven nada. Un bar o una
+// Lista de clientes de pedido fijo, escrita a mano en data/clientes-fijos.json.
+//
+// Se decidió a mano y no por los datos porque los datos no siempre aciertan:
+// La Panera figura con un 19 % de devoluciones en sus albaranes y aun así su
+// pedido es fijo, así que esos negativos son otra cosa. Y al revés, un cliente
+// puede no haber devuelto nada en dos meses por casualidad.
+const RUTA_FIJOS = process.env['CLIENTES_FIJOS_PATH']
+  ?? path.join(process.cwd(), 'data', 'clientes-fijos.json');
+
+let patronesFijos: string[] | null = null;
+
+export function patrones(): string[] {
+  if (patronesFijos) return patronesFijos;
+  try {
+    const j = JSON.parse(fs.readFileSync(RUTA_FIJOS, 'utf-8')) as { fijos?: string[] };
+    patronesFijos = j.fijos ?? [];
+  } catch {
+    patronesFijos = [];
+  }
+  return patronesFijos;
+}
+
+// ¿Es de pedido fijo? Vale que encaje el nombre del punto o el del cliente.
+export function esFijo(...nombres: string[]): boolean {
+  return patrones().some(pat => {
+    const suyas = ps.palabras(pat);
+    return suyas.length > 0 && nombres.some(n => {
+      const dentro = new Set(ps.palabras(n));
+      return suyas.every(w => dentro.has(w));
+    });
+  });
+}
+
+// Solo para diagnóstico: clientes que nunca devuelven nada. Un bar o una
 // residencia piden lo mismo cada día y lo venden todo, así que ajustarles la
 // cantidad por la venta de una semana es meterse donde no toca. Se detectan
 // solos: cero devoluciones en el periodo mirado.
@@ -246,7 +281,7 @@ export function revisarSemanaAnterior(
   for (const punto of ps.puntos(filas)) {
     const cliente = mapa.get(punto);
     if (!cliente) continue;
-    if (fijos.has(cliente)) { fijosTocados.add(punto); continue; }
+    if (fijos.has(cliente) || esFijo(punto, cliente)) { fijosTocados.add(punto); continue; }
 
     for (let i = 0; i < 7; i++) {
       const dia = ps.DIAS[i]!;
