@@ -1,5 +1,6 @@
 import { listAllOrdersForDate } from './holdedClient';
 import * as encargos from './encargosService';
+import * as penas from './penasService';
 import { log } from '../utils/logger';
 
 const DAY_NAMES: Record<number, string> = {
@@ -16,10 +17,15 @@ export async function buildProductionSummary(
   // Los encargos sueltos no están en Holded, viven en el bot. Al obrador le da
   // igual de dónde venga cada pieza: tienen que salir en el mismo resumen.
   const textoEncargos = encargos.textoProduccion(dateStr);
+  // Los pedidos de peñas también hay que hornearlos, y en fiestas son el
+  // grueso del día. No aparecían en ningún sitio salvo /pedidos_penas.
+  const textoPenas = penas.textoProduccion(dateStr);
 
   if (orders.length === 0) {
     const vacio = `📦 Producción ${dateStr} (${dayName})\n\nNo hay pedidos de clientes para este día.`;
-    return textoEncargos ? vacio + '\n' + textoEncargos : vacio;
+    return vacio +
+      (textoEncargos ? '\n' + textoEncargos : '') +
+      (textoPenas ? '\n' + textoPenas : '');
   }
 
   // Sumar cantidades por nombre de producto
@@ -41,6 +47,7 @@ export async function buildProductionSummary(
   text += `${orders.length} pedido(s)\n\n`;
   text += lines.join('\n');
   if (textoEncargos) text += '\n' + textoEncargos;
+  if (textoPenas) text += '\n' + textoPenas;
 
   return text;
 }

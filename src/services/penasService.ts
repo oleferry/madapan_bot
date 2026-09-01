@@ -182,5 +182,31 @@ export function resumen(): string {
   return t;
 }
 
+// Bloque para el resumen de producción del día.
+//
+// Va aparte de los encargos porque es otra cosa: un encargo se recoge suelto,
+// esto es el pedido de una peña entera. Al obrador le importa saber para quién
+// es, que son cantidades grandes y se entregan juntas.
+export function textoProduccion(fecha: string): string {
+  const totales = totalesDia(fecha);
+  if (!totales.length) return '';
+
+  const delDia = todos().filter(p => p.dias.some(d => d.fecha === fecha && d.lineas.length));
+  let txt = `
+🎪 *PEÑAS* (${delDia.length})
+`;
+  for (const t of totales) txt += `  ${t.cantidad} × ${t.producto}
+`;
+
+  // Quién se lleva qué: son pedidos que se preparan y se entregan enteros.
+  for (const p of delDia) {
+    const suyo = p.dias.find(d => d.fecha === fecha)!;
+    txt += `    · ${p.pena} (${p.telefono}): `;
+    txt += suyo.lineas.map(l => `${l.cantidad} ${l.producto}${l.regalo ? ' 🎁' : ''}`).join(', ');
+    txt += '\n';
+  }
+  return txt;
+}
+
 // Solo para tests.
 export function _reset(): void { cache = null; }
