@@ -53,6 +53,10 @@ export const config = {
   pagosPath: process.env['PAGOS_PATH'] ?? persistPath('pizza-pagos.json', 'data/pizza-pagos.json'),
   sobrasPath: process.env['SOBRAS_PATH'] ?? persistPath('sobras.json', 'data/sobras.json'),
   revertirPath: process.env['REVERTIR_PATH'] ?? persistPath('revertir.json', 'data/revertir.json'),
+  // Aviso diario de encargos y peñas de los próximos días. Va al chat de la
+  // panadería: quien compra los ingredientes tiene que verlo con tiempo.
+  extrasChatId: process.env['EXTRAS_CHAT_ID'] ?? process.env['WAYBILLS_CHAT_ID'] ?? process.env['TELEGRAM_INTERNAL_CHAT_ID'] ?? '',
+  extrasHour: parseInt(process.env['EXTRAS_HOUR'] ?? '7', 10),
   penasPath: process.env['PENAS_PATH'] ?? persistPath('penas.json', 'data/penas.json'),
   comprasPath: process.env['COMPRAS_PATH'] ?? persistPath('compras.json', 'data/compras.json'),
   // Día de la semana del borrador de pedidos a proveedor (3 = miércoles).

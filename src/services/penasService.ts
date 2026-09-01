@@ -18,8 +18,11 @@ export const DIAS_FIESTAS = [
 ];
 
 // El regalo por pedir los cinco días. Se entrega el último.
+//
+// La Super cookie salió del regalo el 31/08/2026: es un producto de venta
+// (COOK-SUP, 500 g, 7,50 €) y se pide como cualquier otro.
 export const DIA_REGALO = '2026-09-30';
-export const REGALO = ['Super chapata', 'Super cookie'];
+export const REGALO = ['Super chapata'];
 
 export interface LineaPena {
   producto: string;
@@ -157,7 +160,7 @@ export function textoPedido(p: PedidoPena): string {
       t += `   ${l.cantidad} × ${l.producto}${l.regalo ? '  🎁 regalo' : ''}\n`;
     }
   }
-  if (p.completo) t += `\n🎁 Pedido completo: llevan Super chapata y Super cookie el día 30.`;
+  if (p.completo) t += `\n🎁 Pedido completo: llevan ${REGALO.join(' y ')} el día 30.`;
   return t;
 }
 

@@ -28,8 +28,9 @@ describe('pedidos de peñas', () => {
     const p = penas.crear({ pena: 'Los Tardones', telefono: '612345678', telegramId: '1', dias: todosLosDias() });
     expect(p.completo).toBe(true);
     const ultimo = p.dias.find(d => d.fecha === penas.DIA_REGALO)!;
+    // La Super cookie ya no se regala: es producto de venta (COOK-SUP).
     expect(ultimo.lineas.filter(l => l.regalo).map(l => l.producto))
-      .toEqual(['Super chapata', 'Super cookie']);
+      .toEqual(['Super chapata']);
   });
 
   it('con cuatro días no hay regalo, por cerca que se quede', () => {
@@ -51,7 +52,7 @@ describe('pedidos de peñas', () => {
     // Si el regalo valiera como línea del día 30, pedir cuatro días daría
     // el quinto por la cara.
     const dias = todosLosDias().slice(0, 4);
-    dias.push({ fecha: penas.DIA_REGALO, lineas: [{ producto: 'Super cookie', cantidad: 1, regalo: true }] });
+    dias.push({ fecha: penas.DIA_REGALO, lineas: [{ producto: 'Super chapata', cantidad: 1, regalo: true }] });
     expect(penas.esCompleto(dias)).toBe(false);
   });
 

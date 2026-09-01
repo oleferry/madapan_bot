@@ -9,6 +9,7 @@ import { scheduleWeeklyOrders } from './jobs/weeklyOrdersJob';
 import { scheduleComprasBorrador } from './jobs/comprasJob';
 import { scheduleRecordatorioRevertir } from './jobs/revertirJob';
 import { scheduleAjusteSemanal } from './jobs/ajusteSemanalJob';
+import { scheduleExtras } from './jobs/extrasJob';
 import { log } from './utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -34,6 +35,8 @@ async function main(): Promise<void> {
   scheduleRecordatorioRevertir(bot as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   scheduleAjusteSemanal(bot as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  scheduleExtras(bot as any);
 
   log('main', `Bot started. DRY_RUN=${config.dryRun}`);
 

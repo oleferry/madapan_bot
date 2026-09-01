@@ -137,6 +137,7 @@ import * as pizzaService from '../services/pizzaService';
 import { sendDailyWaybills } from '../jobs/dailyWaybillsJob';
 import { prepararCargaSemanal, confirmarCargaSemanal, cancelarCargaSemanal } from '../jobs/weeklyOrdersJob';
 import { revisarYAvisar, propuestaPendiente, descartarPropuesta } from '../jobs/ajusteSemanalJob';
+import { avisar as avisarExtras, construirTexto as textoExtras } from '../jobs/extrasJob';
 
 function isStaff(ctx: { from?: { id: number } }): boolean {
   return config.adminTelegramIds.includes(String(ctx.from?.id ?? ''));
@@ -421,6 +422,23 @@ export function createBot(): Telegraf<BotContext> {
     await handlePendientes(ctx);
   });
 
+  // Lo que hay pedido fuera de lo habitual en los próximos días, para poder
+  // comprar ingredientes a tiempo.
+  bot.command('extras', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    const { toZonedTime, format } = await import('date-fns-tz');
+    const hoy = format(toZonedTime(new Date(), config.timezone), 'yyyy-MM-dd', { timeZone: config.timezone });
+    const t = textoExtras(hoy);
+    for (let i = 0; i < t.length; i += 3900) await ctx.reply(t.slice(i, i + 3900));
+  });
+
+  // Manda el aviso a la panadería ahora mismo, sin esperar a mañana.
+  bot.command('extras_avisar', async (ctx) => {
+    if (!isStaff(ctx)) return;
+    await avisarExtras(ctx.telegram);
+    await ctx.reply('Aviso enviado.');
+  });
+
   // Peñas — pedido de fiestas, público
   bot.command('penas', handlePenaStart);
   bot.command('peñas', handlePenaStart);
@@ -517,6 +535,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'pizzas_dia_extra', description: 'Abrir un día puntual de pizza (staff)' },
     { command: 'pizzas_dia_extra_quitar', description: 'Quitar un día puntual de pizza (staff)' },
     { command: 'pedidos_pizzas', description: 'Ver reservas de pizza del finde (staff)' },
+    { command: 'extras', description: 'Encargos y peñas de los próximos 5 días (staff)' },
     { command: 'pedidos_penas', description: 'Ver los pedidos de peñas (staff)' },
     { command: 'albaranes', description: 'PDF de albaranes del día (staff)' },
     { command: 'encargo', description: 'Apuntar un encargo suelto (staff)' },

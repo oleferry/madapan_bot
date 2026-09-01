@@ -26,6 +26,7 @@ const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
   },
   { nombre: '🍖 Asados', productos: ['Asado'] },
   { nombre: '🍕 Pizzas', productos: ['Pizza'] },
+  { nombre: '🍪 Dulces', productos: ['Super cookie', 'Caja de 4 cookies', 'Rosquillas 500gr'] },
 ];
 
 export interface PenaSessionData {
@@ -56,8 +57,8 @@ export async function handlePenaStart(ctx: BotContext): Promise<void> {
   let t = '🎪 *Pedidos de peñas — Fiestas*\n\n';
   t += 'Preparamos vuestro pan, empanadas, asados y pizzas para los días de fiestas:\n';
   for (const d of penas.DIAS_FIESTAS) t += `  · ${d.etiqueta}\n`;
-  t += '\n🎁 Si hacéis pedido para *los cinco días*, os regalamos una ';
-  t += '*Super chapata* y una *Super cookie* el día 30.\n\n';
+  t += `\n🎁 Si hacéis pedido para *los cinco días*, os regalamos una `;
+  t += `*${penas.REGALO.join('* y una *')}* el día 30.\n\n`;
   t += '¿Cómo se llama vuestra peña?';
 
   await ctx.reply(t, { parse_mode: 'Markdown' });
@@ -200,7 +201,7 @@ export async function handlePenaFin(ctx: BotContext): Promise<void> {
     for (const l of d.lineas) t += `   ${l.cantidad} × ${l.producto}\n`;
   }
   t += completo
-    ? '\n🎁 ¡Pedido completo! Llevaréis Super chapata y Super cookie el día 30.'
+    ? `\n🎁 ¡Pedido completo! Llevaréis ${penas.REGALO.join(' y ')} el día 30.`
     : `\n(Con los ${penas.DIAS_FIESTAS.length} días entraría el regalo.)`;
   t += '\n\n¿Lo confirmamos?';
 
