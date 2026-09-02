@@ -8,9 +8,12 @@ process.env['PENAS_PATH'] = path.join(tmp, 'penas.json');
 import * as penas from '../src/services/penasService';
 
 const linea = (producto: string, cantidad: number): penas.LineaPena => ({ producto, cantidad });
-const todosLosDias = () => penas.DIAS_FIESTAS.map(f => ({
-  fecha: f.fecha, lineas: [linea('Barra', 10)],
-}));
+
+// Precios reales de Holded, con el IVA incluido.
+const PRECIOS = new Map([
+  ['barra', 1.40], ['pan de cuadros', 1.95], ['chapata', 1.50],
+  ['asado', 30], ['pizza', 14.95], ['tarta de limon', 25], ['super cookie', 7.50],
+]);
 
 describe('pedidos de peñas', () => {
   beforeEach(() => {
@@ -24,42 +27,57 @@ describe('pedidos de peñas', () => {
     expect(penas.DIAS_FIESTAS[4]!.fecha).toBe('2026-09-30');
   });
 
-  it('pedir los cinco días da el regalo, y va en el día 30', () => {
-    const p = penas.crear({ pena: 'Los Tardones', telefono: '612345678', telegramId: '1', dias: todosLosDias() });
-    expect(p.completo).toBe(true);
-    const ultimo = p.dias.find(d => d.fecha === penas.DIA_REGALO)!;
-    // La Super cookie ya no se regala: es producto de venta (COOK-SUP).
-    expect(ultimo.lineas.filter(l => l.regalo).map(l => l.producto))
-      .toEqual(['Super chapata']);
+  it('suma el pedido con los precios de Holded', () => {
+    const dias = [{ fecha: '2026-09-19', lineas: [linea('Barra', 10), linea('Pizza', 2)] }];
+    // 10 × 1,40 + 2 × 14,95 = 43,90
+    expect(penas.calcularTotal(dias, PRECIOS).total).toBe(43.9);
   });
 
-  it('con cuatro días no hay regalo, por cerca que se quede', () => {
+  it('avisa de lo que no ha podido valorar', () => {
+    const dias = [{ fecha: '2026-09-19', lineas: [linea('Empanada de cecina', 2)] }];
+    const { total, sinPrecio } = penas.calcularTotal(dias, PRECIOS);
+    expect(total).toBe(0);
+    expect(sinPrecio).toEqual(['Empanada de cecina']);
+  });
+
+  it('los umbrales son estrictos: 60 clavados no llegan', () => {
+    expect(penas.regalosPara(60)).toEqual([]);
+    expect(penas.regalosPara(60.01)).toEqual(['Super chapata']);
+    expect(penas.regalosPara(120)).toEqual(['Super chapata']);
+    expect(penas.regalosPara(120.01)).toEqual(['Super chapata', 'Brazo gitano']);
+  });
+
+  it('dice cuál es el siguiente regalo y cuándo ya no queda ninguno', () => {
+    expect(penas.siguienteUmbral(30)!.desde).toBe(60);
+    expect(penas.siguienteUmbral(80)!.desde).toBe(120);
+    expect(penas.siguienteUmbral(200)).toBeNull();
+  });
+
+  it('el regalo se añade al día 30 y no cuenta para el total', () => {
     const p = penas.crear({
-      pena: 'Casi Casi', telefono: '612345678', telegramId: '2',
-      dias: todosLosDias().slice(0, 4),
+      pena: 'Los Tardones', telefono: '612345678', telegramId: '1', precios: PRECIOS,
+      dias: [{ fecha: '2026-09-19', lineas: [linea('Asado', 3)] }],   // 90 €
     });
-    expect(p.completo).toBe(false);
-    expect(p.dias.flatMap(d => d.lineas).some(l => l.regalo)).toBe(false);
+    expect(p.total).toBe(90);
+    expect(p.regalos).toEqual(['Super chapata']);
+    const dia30 = p.dias.find(d => d.fecha === penas.DIA_REGALO)!;
+    expect(dia30.lineas.map(l => l.producto)).toEqual(['Super chapata']);
+    // Y el regalo no infla el total ni desbloquea el siguiente umbral.
+    expect(penas.calcularTotal(p.dias, PRECIOS).total).toBe(90);
   });
 
-  it('un día apuntado pero vacío no cuenta como pedido', () => {
-    const dias = todosLosDias();
-    dias[2]!.lineas = [];
-    expect(penas.esCompleto(dias)).toBe(false);
-  });
-
-  it('el regalo no cuenta para completar el pedido', () => {
-    // Si el regalo valiera como línea del día 30, pedir cuatro días daría
-    // el quinto por la cara.
-    const dias = todosLosDias().slice(0, 4);
-    dias.push({ fecha: penas.DIA_REGALO, lineas: [{ producto: 'Super chapata', cantidad: 1, regalo: true }] });
-    expect(penas.esCompleto(dias)).toBe(false);
+  it('pasando de 120 caen los dos regalos', () => {
+    const p = penas.crear({
+      pena: 'Peña Grande', telefono: '612345678', telegramId: '1', precios: PRECIOS,
+      dias: [{ fecha: '2026-09-19', lineas: [linea('Asado', 5)] }],   // 150 €
+    });
+    expect(p.regalos).toEqual(['Super chapata', 'Brazo gitano']);
   });
 
   it('los totales del día suman lo de todas las peñas', () => {
-    penas.crear({ pena: 'Peña A', telefono: '612345678', telegramId: '1',
+    penas.crear({ pena: 'Peña A', telefono: '612345678', telegramId: '1', precios: PRECIOS,
       dias: [{ fecha: '2026-09-19', lineas: [linea('Barra', 10), linea('Asado', 2)] }] });
-    penas.crear({ pena: 'Peña B', telefono: '622345678', telegramId: '2',
+    penas.crear({ pena: 'Peña B', telefono: '622345678', telegramId: '2', precios: PRECIOS,
       dias: [{ fecha: '2026-09-19', lineas: [linea('Barra', 5)] }] });
 
     expect(penas.totalesDia('2026-09-19')).toEqual([
@@ -69,7 +87,7 @@ describe('pedidos de peñas', () => {
   });
 
   it('numera los pedidos y sobrevive a un reinicio', () => {
-    const a = penas.crear({ pena: 'Peña A', telefono: '612345678', telegramId: '1',
+    const a = penas.crear({ pena: 'Peña A', telefono: '612345678', telegramId: '1', precios: PRECIOS,
       dias: [{ fecha: '2026-09-19', lineas: [linea('Barra', 1)] }] });
     expect(a.numero).toBe('PÑ-0001');
     penas._reset();

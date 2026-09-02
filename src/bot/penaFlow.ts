@@ -2,6 +2,7 @@ import { Markup } from 'telegraf';
 import { Message } from 'telegraf/types';
 import { BotContext } from './customerFlows';
 import * as penas from '../services/penasService';
+import * as precios from '../services/preciosService';
 import { sendToAllStaff } from '../services/notifier';
 import { config } from '../config';
 import { log, warn } from '../utils/logger';
@@ -16,7 +17,9 @@ import { log, warn } from '../utils/logger';
 const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
   {
     nombre: '🥖 Pan',
-    productos: ['Barra', 'Barra grande', 'Pan de cuadros', 'Chapata', 'Hogaza',
+    // Sin "Barra grande": en Holded la grande es la Barra normal, y sin
+    // producto no hay precio con el que sumar el total.
+    productos: ['Barra', 'Pan de cuadros', 'Chapata', 'Hogaza',
       'Pan de canteros', 'Pan pasas y nueces'],
   },
   {
@@ -27,6 +30,11 @@ const CATEGORIAS: Array<{ nombre: string; productos: string[] }> = [
   { nombre: '🍖 Asados', productos: ['Asado'] },
   { nombre: '🍕 Pizzas', productos: ['Pizza'] },
   { nombre: '🍪 Dulces', productos: ['Super cookie', 'Caja de 4 cookies', 'Rosquillas 500gr'] },
+  {
+    nombre: '🎂 Tartas',
+    productos: ['Tarta (genérica)', 'Tarta de limón', 'Tarta de queso con frutos rojos',
+      'Tarta de San Marcos con chocolate', 'Tarta de hojaldre y crema', 'Tarta Pavlova'],
+  },
 ];
 
 export interface PenaSessionData {
@@ -35,6 +43,41 @@ export interface PenaSessionData {
   dias: penas.PedidoDia[];
   fecha?: string;          // día que se está rellenando
   producto?: string;
+}
+
+// Total del pedido tal y como va, para poder decirle a la peña cuánto lleva y
+// cuánto le falta para el siguiente regalo.
+async function totalDe(s: PenaSessionData): Promise<{ total: number; sinPrecio: string[] }> {
+  try {
+    return penas.calcularTotal(s.dias, await precios.precios());
+  } catch (err) {
+    warn('PenaFlow', `No se pudieron leer los precios: ${(err as Error).message}`);
+    return { total: 0, sinPrecio: [] };
+  }
+}
+
+// Línea de "llevas X €, te faltan Y para el regalo".
+function textoTotal(total: number, sinPrecio: string[]): string {
+  if (!total && !sinPrecio.length) return '';
+  let t = `
+💶 Lleváis ${total.toFixed(2)} €`;
+  const siguiente = penas.siguienteUmbral(total);
+  if (siguiente) {
+    const falta = siguiente.desde - total;
+    // "Os faltan 0,01 €" es cierto pero queda ridículo: cuando caen justo en
+    // el umbral se dice de otra forma.
+    t += falta < 1
+      ? `
+🎁 ¡Casi! Con una pieza más entra ${siguiente.regalos.join(' + ')}`
+      : `
+🎁 Os faltan ${falta.toFixed(2)} € para ${siguiente.regalos.join(' + ')}`;
+  } else {
+    t += `
+🎁 Ya tenéis ${penas.regalosPara(total).join(' + ')}`;
+  }
+  if (sinPrecio.length) t += `
+(${sinPrecio.join(', ')}: se cobra al peso, no entra en la cuenta)`;
+  return t;
 }
 
 // Mismo criterio que en las pizzas: sin teléfono no hay forma de avisar de
@@ -57,8 +100,10 @@ export async function handlePenaStart(ctx: BotContext): Promise<void> {
   let t = '🎪 *Pedidos de peñas — Fiestas*\n\n';
   t += 'Preparamos vuestro pan, empanadas, asados y pizzas para los días de fiestas:\n';
   for (const d of penas.DIAS_FIESTAS) t += `  · ${d.etiqueta}\n`;
-  t += `\n🎁 Si hacéis pedido para *los cinco días*, os regalamos una `;
-  t += `*${penas.REGALO.join('* y una *')}* el día 30.\n\n`;
+  t += '\n🎁 *Regalos por vuestro pedido de fiestas*\n';
+  t += '  · Más de 60 € → *Super chapata*\n';
+  t += '  · Más de 120 € → *Super chapata* y *Brazo gitano*\n';
+  t += 'Se entregan el día 30. Os iré diciendo cuánto lleváis y cuánto os falta.\n\n';
   t += '¿Cómo se llama vuestra peña?';
 
   await ctx.reply(t, { parse_mode: 'Markdown' });
@@ -82,11 +127,10 @@ async function pedirDia(ctx: BotContext): Promise<void> {
   const puestos = s.dias.filter(d => d.lineas.length).length;
   if (puestos) botones.push([Markup.button.callback('✅ Terminar el pedido', 'pn_fin')]);
 
-  let t = puestos
-    ? `Llevas ${puestos} de ${penas.DIAS_FIESTAS.length} días.\n\n¿Añadimos otro?`
-    : '¿Para qué día queréis pedir?';
-  if (puestos && puestos < penas.DIAS_FIESTAS.length) {
-    t += `\n\n🎁 Si pedís los ${penas.DIAS_FIESTAS.length} días, entra el regalo.`;
+  let t = puestos ? '¿Añadimos otro día?' : '¿Para qué día queréis pedir?';
+  if (puestos) {
+    const { total, sinPrecio } = await totalDe(s);
+    t += '\n' + textoTotal(total, sinPrecio);
   }
   await ctx.reply(t, Markup.inlineKeyboard(botones));
 }
@@ -167,8 +211,9 @@ export async function handlePenaCantidad(ctx: BotContext, cantidad: number): Pro
   delete s.producto;
   ctx.session.step = 'idle';
 
+  const { total, sinPrecio } = await totalDe(s);
   await ctx.reply(
-    `✅ ${cantidad} × ${puesto} para el ${etiqueta(s.fecha)}`,
+    `✅ ${cantidad} × ${puesto} para el ${etiqueta(s.fecha)}` + textoTotal(total, sinPrecio),
     Markup.inlineKeyboard([
       [Markup.button.callback('➕ Añadir más de este día', 'pn_cats')],
       [Markup.button.callback('📅 Otro día', 'pn_dias')],
@@ -193,16 +238,14 @@ export async function handlePenaFin(ctx: BotContext): Promise<void> {
   }
   ctx.session.step = 'idle';
 
-  const completo = penas.esCompleto(s.dias);
+  const { total, sinPrecio } = await totalDe(s);
   let t = `🎪 ${s.pena}\n📞 ${s.telefono}\n\n`;
   for (const d of [...s.dias].sort((a, b) => a.fecha.localeCompare(b.fecha))) {
     if (!d.lineas.length) continue;
     t += `${etiqueta(d.fecha)}\n`;
     for (const l of d.lineas) t += `   ${l.cantidad} × ${l.producto}\n`;
   }
-  t += completo
-    ? `\n🎁 ¡Pedido completo! Llevaréis ${penas.REGALO.join(' y ')} el día 30.`
-    : `\n(Con los ${penas.DIAS_FIESTAS.length} días entraría el regalo.)`;
+  t += textoTotal(total, sinPrecio);
   t += '\n\n¿Lo confirmamos?';
 
   await ctx.reply(t, Markup.inlineKeyboard([
@@ -218,11 +261,21 @@ export async function handlePenaConfirmar(ctx: BotContext): Promise<void> {
     return;
   }
 
+  // Los precios se leen aquí y no antes: entre que empieza el pedido y lo
+  // confirma pueden pasar minutos, y lo que vale es el precio al cerrarlo.
+  let tabla = new Map<string, number>();
+  try {
+    tabla = await precios.precios();
+  } catch (err) {
+    warn('PenaFlow', `Sin precios al confirmar: ${(err as Error).message}`);
+  }
+
   const pedido = penas.crear({
     pena: s.pena,
     telefono: s.telefono,
     telegramId: String(ctx.from?.id ?? ''),
     dias: s.dias.filter(d => d.lineas.length),
+    precios: tabla,
   });
 
   delete ctx.session.pena;

@@ -17,12 +17,30 @@ export const DIAS_FIESTAS = [
   { fecha: '2026-09-30', etiqueta: 'miércoles 30 de septiembre' },
 ];
 
-// El regalo por pedir los cinco días. Se entrega el último.
+// Los regalos van por IMPORTE del pedido de todas las fiestas, no por número
+// de días: una peña que pide mucho un solo día merece lo mismo que otra que
+// reparte poco en cinco.
 //
-// La Super cookie salió del regalo el 31/08/2026: es un producto de venta
-// (COOK-SUP, 500 g, 7,50 €) y se pide como cualquier otro.
+// Se entregan el último día. La Super cookie salió del regalo el 31/08/2026:
+// es un producto de venta (COOK-SUP, 7,50 €) y se pide como cualquier otro.
 export const DIA_REGALO = '2026-09-30';
-export const REGALO = ['Super chapata'];
+
+export const UMBRALES = [
+  { desde: 120, regalos: ['Super chapata', 'Brazo gitano'] },
+  { desde: 60, regalos: ['Super chapata'] },
+];
+
+// Qué le toca a un pedido de ese importe. "Superar" es estrictamente mayor:
+// 60 € clavados no llegan, 60,01 sí.
+export function regalosPara(total: number): string[] {
+  return UMBRALES.find(u => total > u.desde)?.regalos ?? [];
+}
+
+// Cuánto falta para el siguiente regalo, si es que falta algo.
+export function siguienteUmbral(total: number): { desde: number; regalos: string[] } | null {
+  const pendientes = [...UMBRALES].sort((a, b) => a.desde - b.desde).filter(u => total <= u.desde);
+  return pendientes[0] ?? null;
+}
 
 export interface LineaPena {
   producto: string;
@@ -41,7 +59,9 @@ export interface PedidoPena {
   telefono: string;
   telegramId: string;
   dias: PedidoDia[];
-  completo: boolean;           // pidió los cinco días → lleva regalo
+  total: number;               // PVP de todo el pedido, IVA incluido
+  regalos: string[];
+  sinPrecio: string[];         // productos que no se pudieron valorar
   creadoEn: string;
   cancelado?: boolean;
 }
@@ -71,29 +91,47 @@ function guardar(): void {
   fs.writeFileSync(RUTA, JSON.stringify(p, null, 2), 'utf-8');
 }
 
-// Un pedido cuenta como completo si lleva algo en LOS CINCO días. Pedir cuatro
-// no da derecho al regalo, por mucho que se acerque.
-export function esCompleto(dias: PedidoDia[]): boolean {
-  const conAlgo = dias.filter(d => d.lineas.some(l => !l.regalo && l.cantidad > 0));
-  return DIAS_FIESTAS.every(f => conAlgo.some(d => d.fecha === f.fecha));
+// Importe del pedido. Los regalos no suman: si sumaran, un regalo podría
+// empujar el total por encima del siguiente umbral y desbloquear otro.
+export function calcularTotal(
+  dias: PedidoDia[], precios: Map<string, number>
+): { total: number; sinPrecio: string[] } {
+  let total = 0;
+  const sinPrecio = new Set<string>();
+  for (const d of dias) {
+    for (const l of d.lineas) {
+      if (l.regalo) continue;
+      const p = precios.get(normalizarNombre(l.producto));
+      if (p === undefined) { sinPrecio.add(l.producto); continue; }
+      total += p * l.cantidad;
+    }
+  }
+  return { total: Math.round(total * 100) / 100, sinPrecio: [...sinPrecio] };
+}
+
+function normalizarNombre(s: string): string {
+  return (s ?? '').toLowerCase().normalize('NFD')
+    .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 export function crear(datos: {
   pena: string; telefono: string; telegramId: string; dias: PedidoDia[];
+  precios: Map<string, number>;
 }): PedidoPena {
   const lista = cargar();
-  const completo = esCompleto(datos.dias);
+  const { total, sinPrecio } = calcularTotal(datos.dias, datos.precios);
+  const regalos = regalosPara(total);
 
-  // El regalo se añade como una línea más del último día, para que aparezca en
-  // producción y nadie se olvide de prepararlo.
+  // Los regalos se añaden como líneas del último día, para que aparezcan en
+  // producción y nadie se olvide de prepararlos.
   const dias = datos.dias.map(d => ({ ...d, lineas: [...d.lineas] }));
-  if (completo) {
+  if (regalos.length) {
     let ultimo = dias.find(d => d.fecha === DIA_REGALO);
     if (!ultimo) {
       ultimo = { fecha: DIA_REGALO, lineas: [] };
       dias.push(ultimo);
     }
-    for (const r of REGALO) {
+    for (const r of regalos) {
       if (!ultimo.lineas.some(l => l.producto === r)) {
         ultimo.lineas.push({ producto: r, cantidad: 1, regalo: true });
       }
@@ -106,12 +144,13 @@ export function crear(datos: {
     telefono: datos.telefono,
     telegramId: datos.telegramId,
     dias: dias.sort((a, b) => a.fecha.localeCompare(b.fecha)),
-    completo,
+    total, regalos, sinPrecio,
     creadoEn: new Date().toISOString(),
   };
   lista.push(pedido);
   guardar();
-  log('Penas', `${pedido.numero}: ${pedido.pena}, ${dias.length} día(s)${completo ? ' (COMPLETO, con regalo)' : ''}`);
+  log('Penas', `${pedido.numero}: ${pedido.pena}, ${total.toFixed(2)} €` +
+    (regalos.length ? ` (regalo: ${regalos.join(' + ')})` : ''));
   return pedido;
 }
 
@@ -160,7 +199,9 @@ export function textoPedido(p: PedidoPena): string {
       t += `   ${l.cantidad} × ${l.producto}${l.regalo ? '  🎁 regalo' : ''}\n`;
     }
   }
-  if (p.completo) t += `\n🎁 Pedido completo: llevan ${REGALO.join(' y ')} el día 30.`;
+  t += `\nTotal: ${p.total.toFixed(2)} €`;
+  if (p.sinPrecio.length) t += `  (sin valorar: ${p.sinPrecio.join(', ')})`;
+  if (p.regalos.length) t += `\n🎁 Regalo: ${p.regalos.join(' + ')} el día 30.`;
   return t;
 }
 
@@ -170,7 +211,8 @@ export function resumen(): string {
   if (!pedidos.length) return 'Todavía no hay ningún pedido de peñas.';
 
   let t = `🎪 PEDIDOS DE PEÑAS — ${pedidos.length} peña(s)\n`;
-  t += `${pedidos.filter(p => p.completo).length} con pedido completo (llevan regalo)\n\n`;
+  t += `${pedidos.filter(p => p.regalos.length).length} con regalo · ` +
+    `${pedidos.reduce((x, p) => x + p.total, 0).toFixed(2)} € en total\n\n`;
   for (const f of DIAS_FIESTAS) {
     const totales = totalesDia(f.fecha);
     t += `— ${f.etiqueta} —\n`;
