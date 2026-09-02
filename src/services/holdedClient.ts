@@ -675,3 +675,24 @@ export async function addLineToOrder(
     return { success: false, error: msg };
   }
 }
+
+// Borra un pedido de venta. Solo para pedidos pendientes: si ya se convirtió
+// en albarán o factura, Holded lo rechaza y devolvemos el motivo tal cual.
+export async function deleteSalesOrder(
+  orderId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (isDryRun) {
+    log('HoldedClient', `[DRY_RUN] Borraría el pedido ${orderId}`);
+    return { ok: true };
+  }
+  try {
+    await withRetry(() => getInvoicingV1Client().delete(`/documents/salesorder/${orderId}`));
+    log('HoldedClient', `Pedido ${orderId} borrado`);
+    return { ok: true };
+  } catch (err) {
+    const ax = err as AxiosError;
+    const msg = `${ax.message} ${JSON.stringify(ax.response?.data ?? '')}`.slice(0, 200);
+    error('HoldedClient', `deleteSalesOrder failed (${orderId}): ${msg}`);
+    return { ok: false, error: msg };
+  }
+}
