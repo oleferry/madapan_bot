@@ -75,36 +75,62 @@ describe('venta real a partir de las devoluciones', () => {
   });
 });
 
-describe('el albarán va fechado el día anterior a la entrega', () => {
-  // Comprobado contra la hoja: el albarán del viernes 28/08 lleva 70 panes,
-  // que es la cantidad del SÁBADO. Se genera de madrugada, antes de repartir.
+describe('el albarán lleva la fecha real del reparto', () => {
+  // Lo que va corrido un día es la HOJA, no el albarán: la celda "sábado"
+  // contiene el pan que se hornea el viernes. Comprobado 8 días de 8.
+  //
+  // Antes se creía lo contrario y se leía el albarán del día anterior, así que
+  // el pan de cada día se comparaba con las ventas del día de antes.
   const entregas: Entrega[] = [
-    // Albarán del viernes 28 → entrega del sábado 29: 70 piezas.
+    // Viernes 28: se reparten 70.
     { fecha: '2026-08-28', contactId: 'c1', cliente: 'El Arco',
       lineas: [{ sku: 'SKU63', name: 'Pan de cuadros', units: 70 }] },
-    // Albarán del sábado 29 → entrega del domingo, y las sobras del sábado.
+    // Sábado 29: se reparten 65, y vuelven 12 del viernes.
     { fecha: '2026-08-29', contactId: 'c1', cliente: 'El Arco',
       lineas: [
-        { sku: 'SKU63', name: 'Pan de cuadros', units: 70 },
-        { sku: 'SKU63', name: 'Pan de cuadros', units: -10 },
+        { sku: 'SKU63', name: 'Pan de cuadros', units: 65 },
+        { sku: 'SKU63', name: 'Pan de cuadros', units: -12 },
+      ] },
+    // Domingo 30: se reparten 40, y vuelven 5 del sábado.
+    { fecha: '2026-08-30', contactId: 'c1', cliente: 'El Arco',
+      lineas: [
+        { sku: 'SKU63', name: 'Pan de cuadros', units: 40 },
+        { sku: 'SKU63', name: 'Pan de cuadros', units: -5 },
       ] },
   ];
 
-  it('lo servido el sábado sale del albarán del viernes', () => {
+  it('lo servido el sábado sale del albarán del sábado', () => {
     // dow 6 = sábado. Referencia: lunes 31, así que el sábado es el 29.
     const v = ventaSemanaAnterior(entregas, 'El Arco', 6, '2026-08-31')[0]!;
-    expect(v.servido).toBe(70);
-    // Y las sobras del sábado están en el albarán fechado el sábado.
-    expect(v.devuelto).toBe(10);
+    expect(v.fecha).toBe('2026-08-29');
+    expect(v.servido).toBe(65);
+    // Las sobras del sábado se recogen el domingo: van en el albarán del 30.
+    expect(v.devuelto).toBe(5);
     expect(v.venta).toBe(60);
     expect(v.sugerido).toBe(66);   // 60 × 1,10
   });
 
-  it('no confunde el día de la entrega con la fecha del documento', () => {
-    // Si se leyera el albarán del sábado como "lo servido el sábado", la
-    // devolución de ese mismo día se restaría del día equivocado.
-    const domingo = ventaSemanaAnterior(entregas, 'El Arco', 0, '2026-08-31');
-    expect(domingo).toHaveLength(1);
-    expect(domingo[0]!.servido).toBe(70);   // del albarán del sábado
+  it('con la regla vieja el sábado habría salido con los números del viernes', () => {
+    // Este es el fallo que se arregló: leer el albarán del día anterior daba
+    // 70 servidas y 12 devueltas, que es el reparto del VIERNES.
+    const v = ventaSemanaAnterior(entregas, 'El Arco', 6, '2026-08-31')[0]!;
+    expect(v.servido).not.toBe(70);
+    expect(v.devuelto).not.toBe(12);
+  });
+
+  it('cada día se compara consigo mismo, no con el anterior', () => {
+    const viernes = ventaSemanaAnterior(entregas, 'El Arco', 5, '2026-08-31')[0]!;
+    expect(viernes.fecha).toBe('2026-08-28');
+    expect(viernes.servido).toBe(70);
+    expect(viernes.devuelto).toBe(12);   // vuelven en el albarán del sábado
+    expect(viernes.venta).toBe(58);
+    expect(viernes.sugerido).toBe(64);   // 58 × 1,10 = 63,8
+  });
+
+  it('sin el albarán del día siguiente no se sabe qué volvió', () => {
+    // El domingo 30 es el último albarán: nadie ha recogido aún sus sobras.
+    const domingo = ventaSemanaAnterior(entregas, 'El Arco', 0, '2026-08-31')[0]!;
+    expect(domingo.servido).toBe(40);
+    expect(domingo.hayDatoDevolucion).toBe(false);
   });
 });

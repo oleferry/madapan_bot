@@ -48,19 +48,18 @@ export interface AjusteProducto {
   semanas: number;          // sobre cuántas semanas se calcula
 }
 
-// El albarán lleva la fecha del día ANTERIOR a la entrega: se genera de
-// madrugada, antes de salir a repartir. Comprobado contra la hoja: el albarán
-// del viernes 28/08 lleva 70 panes de cuadros, que es la cantidad del SÁBADO.
+// El albarán lleva la fecha REAL del día que se reparte. Lo que va corrido un
+// día es la HOJA: la celda "sábado" contiene el pan que se hornea el viernes.
 //
-// De ahí salen las dos reglas:
-//   lo servido el martes  → albarán fechado el LUNES
-//   lo que sobró el martes → albarán fechado el MARTES (el siguiente)
-function diaAnterior(fecha: string): string {
-  const d = new Date(`${fecha}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
+// Aquí hubo un error que duró de agosto a septiembre. Se vio que el albarán
+// del viernes 28/08 llevaba 70 panes de cuadros, que es lo que pone la celda
+// "sábado" de la hoja, y se dedujo que el albarán iba fechado un día antes de
+// la entrega. La observación era buena; la deducción, no: daba por hecho que
+// la etiqueta de la celda era el día de entrega. Comprobado después contra 8
+// días de 8, es al revés. El albarán del viernes es el reparto del viernes.
+//
+// Mientras estuvo mal, el ajuste comparaba el pan de un día con las ventas del
+// anterior y de ahí salían sobras y faltas que no existían.
 function siguienteDia(fecha: string): string {
   const d = new Date(`${fecha}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 1);
@@ -84,9 +83,9 @@ export function ultimoDiaSemana(hoy: string, dow: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Venta media por día de la semana. Ojo: esta función mira las fechas de
-// albarán tal cual, sin el desplazamiento de un día. Se mantiene porque la usa
-// /ajuste, que compara medias, no días concretos.
+// Venta media por día de la semana, para /ajuste, que compara medias en vez de
+// días concretos. Lee las fechas de albarán tal cual, que es lo correcto: la
+// del albarán es la fecha real del reparto.
 export function ventaRealPorDia(
   entregas: historico.Entrega[], cliente: string, dow: number, desde?: string
 ): AjusteProducto[] {
@@ -165,20 +164,20 @@ export function ventaSemanaAnterior(
   entregas: historico.Entrega[], cliente: string, dow: number, hoy: string,
   ventasMostrador?: Map<string, tickets.VentaMostrador>
 ): VentaDia[] {
-  // fecha = el día de ENTREGA; su albarán lleva la fecha del día anterior.
+  // fecha = el día de ENTREGA, que es también la fecha de su albarán.
   const fecha = ultimoDiaSemana(hoy, dow);
   const suyas = entregas.filter(e => e.cliente === cliente);
-  const dia = suyas.find(e => e.fecha === diaAnterior(fecha));
+  const dia = suyas.find(e => e.fecha === fecha);
   if (!dia) return [];
 
   const esTienda = ps.normalizar(cliente) === ps.normalizar(TIENDA);
 
   // Tienda: lo mejor es el ticket, que dice lo VENDIDO sin que nadie cuente
   // nada. Si ese día no hay tickets, se cae al recuento de /sobras.
-  // Reparto: la devolución viene en el albarán del día siguiente.
-  // Las sobras de la entrega del martes van en el albarán fechado el martes,
-  // que es el documento de la entrega del miércoles.
-  const siguiente = suyas.find(e => e.fecha === fecha);
+  // Reparto: la devolución viene en el albarán del día siguiente, en negativo.
+  // Las sobras del martes se apuntan en el albarán del miércoles, cuando el
+  // repartidor recoge lo que no se vendió.
+  const siguiente = suyas.find(e => e.fecha === siguienteDia(fecha));
   const delMostrador = esTienda && diasDesde(fecha, hoy) >= DIAS_FIABLES
     ? ventasMostrador?.get(fecha)
     : undefined;
