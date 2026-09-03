@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
 import { log, warn } from '../utils/logger';
+import { nuevoId } from '../utils/ids';
 import * as historico from './historicoVentas';
 
 // Sobras por punto de entrega. Hoy se cuentan por WhatsApp y se pierden: nadie
@@ -57,7 +58,7 @@ export function registrar(datos: {
   // recuenta, lo que vale es la última cuenta, no la suma de las dos.
   const previa = a.sobras.findIndex(s => s.fecha === datos.fecha && s.cliente === datos.cliente);
   const sobra: Sobra = {
-    id: `S${Date.now().toString(36).toUpperCase()}`,
+    id: nuevoId('S'),
     fecha: datos.fecha, cliente: datos.cliente, lineas: datos.lineas,
     registradoPor: datos.registradoPor, creadoEn: new Date().toISOString(),
   };

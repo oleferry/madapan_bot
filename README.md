@@ -77,6 +77,26 @@ npm start
 npm test
 ```
 
+### Desde la nube (Claude Code web)
+
+El repo está preparado para trabajar desde cualquier sitio sin instalar nada:
+se abre en [claude.ai/code](https://claude.ai/code), se elige `madapan_bot` y
+la sesión arranca con las dependencias ya instaladas. De eso se encarga el hook
+`.claude/hooks/session-start.sh`, que corre `npm install` al abrir la sesión.
+
+Qué esperar de una sesión en la nube:
+
+- `npm test`, `npm run build` y `npx tsc --noEmit` funcionan tal cual.
+- **No hay credenciales.** El hook deja un `.env` mínimo con `DRY_RUN=true`, así
+  que el bot no puede escribir en Holded desde ahí. Para arrancar el bot de
+  verdad hace falta rellenar el `.env` a mano en esa sesión (nunca se commitea).
+- El contenedor es efímero: lo que no se commitee y se empuje, se pierde.
+- El extractor de facturas en Python (`scripts/facturas/extractor.py`) no se
+  instala automáticamente; necesita `PyMuPDF` y `anthropic` si se va a tocar.
+
+Para que el hook aplique a todas las sesiones futuras, tiene que estar en la
+rama por defecto (`main`).
+
 ## 6. Qué hace V2 y qué NO hace
 
 ### Hace:

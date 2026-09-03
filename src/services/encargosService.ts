@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
 import { log, warn } from '../utils/logger';
+import { nuevoId } from '../utils/ids';
 
 // Encargos sueltos: los que hoy viven en el grupo de WhatsApp. Sustituyen a
 // una lista escrita a mano y agrupada por día. Ver docs/encargos-sueltos.md.
@@ -146,7 +147,7 @@ export function crearEncargo(datos: NuevoEncargo): Encargo {
   if (datos.factura) cliente.factura = datos.factura;
 
   const encargo: Encargo = {
-    id: `E${Date.now().toString(36).toUpperCase()}`,
+    id: nuevoId('E'),
     fecha: datos.fecha,
     telefono: tel,
     nombre: datos.nombre,

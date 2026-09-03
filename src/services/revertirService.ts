@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
 import { log, warn } from '../utils/logger';
+import { nuevoId } from '../utils/ids';
 import * as ps from './pedidosSemanaService';
 
 // Cambios temporales pendientes de deshacer.
@@ -65,7 +66,7 @@ export function anotar(descripcion: string, aplicados: ps.Cambio[], hoy: string)
     ...c, actual: c.nuevo, nuevo: c.actual, motivo: 'volver a lo de antes',
   }));
   const p: Pendiente = {
-    id: `R${Date.now().toString(36).toUpperCase()}`,
+    id: nuevoId('R'),
     descripcion,
     creadoEn: new Date().toISOString(),
     recordarEl: proximoDiaDeCarga(hoy),

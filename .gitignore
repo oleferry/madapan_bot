@@ -13,3 +13,9 @@ dist/
 *service_account*.json
 madapanbot-*.json
 gcp-credentials.json
+
+# Python (scripts/facturas)
+__pycache__/
+*.py[cod]
+.venv/
+

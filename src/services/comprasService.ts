@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
 import { log, warn } from '../utils/logger';
+import { nuevoId } from '../utils/ids';
 
 // Lista de la compra: se van apuntando cosas según se acaban ("24 coca colas")
 // y cada dos semanas se agrupan por proveedor en un borrador de pedido.
@@ -114,7 +115,7 @@ export interface NuevoApunte {
 export function apuntar(datos: NuevoApunte): Apunte {
   const a = cargar();
   const apunte: Apunte = {
-    id: `C${Date.now().toString(36).toUpperCase()}`,
+    id: nuevoId('C'),
     texto: datos.texto,
     producto: datos.producto,
     cantidad: datos.cantidad,
